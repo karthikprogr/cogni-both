@@ -1,0 +1,56 @@
+﻿# CogniData Docker Setup
+
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./cognidata.db
+      - GROQ_API_KEY=\
+      - GEMINI_API_KEY=\
+    volumes:
+      - ./backend:/app
+      - dataset_storage:/app/datasets
+    restart: unless-stopped
+    networks:
+      - cognidata-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - cognidata-network
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - cognidata-network
+
+volumes:
+  dataset_storage:
+  qdrant_storage:
+
+networks:
+  cognidata-network:
+    driver: bridge

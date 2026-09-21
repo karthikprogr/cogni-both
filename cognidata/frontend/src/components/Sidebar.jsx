@@ -7,6 +7,7 @@ const NAV = [
   { to:"/chat",       icon:"💬", label:"AI Chat",            sub:"Ask your data" },
   { to:"/upload",     icon:"📤", label:"Upload Dataset",     sub:"CSV · Excel · JSON" },
   { to:"/dashboard",  icon:"📊", label:"Dashboard",          sub:"7 tabs · KPIs · Charts" },
+  { to:"/charts",     icon:"📈", label:"Charts",             sub:"150+ types · Export" },
   { to:"/analyst",    icon:"🧠", label:"AI Analyst",         sub:"SQL · RAG · Analysis" },
   { to:"/analytics",  icon:"🔬", label:"Advanced Analytics", sub:"Stats · Cluster · TS" },
   { to:"/maps",       icon:"🗺️", label:"Advanced Maps",       sub:"Choropleth · H3 · Flow" },

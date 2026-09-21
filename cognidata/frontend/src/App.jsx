@@ -8,6 +8,7 @@ const Login              = lazy(() => import("./pages/Login"));
 const LandingPage        = lazy(() => import("./pages/LandingPage"));
 const Chat               = lazy(() => import("./pages/Chat"));
 const Dashboard          = lazy(() => import("./pages/Dashboard"));
+const Charts             = lazy(() => import("./pages/Charts"));
 const Upload             = lazy(() => import("./pages/Upload"));
 const AutoML             = lazy(() => import("./pages/AutoML"));
 const Admin              = lazy(() => import("./pages/Admin"));
@@ -119,6 +120,7 @@ export default function App() {
             <Route path="/chat"        element={<Chat />} />
             <Route path="/upload"      element={<Upload />} />
             <Route path="/dashboard"   element={<Dashboard />} />
+            <Route path="/charts"      element={<Charts />} />
             <Route path="/analyst"     element={<AIAnalyst />} />
             <Route path="/automl"      element={<AutoML />} />
             <Route path="/geo"         element={<GeoIntelligence />} />
