@@ -140,7 +140,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             ))
             fig.update_layout(title=req.title or "Multi-Column Analysis", template="plotly_dark")
         
-        result = {"plotly_json": fig.to_dict()}
+        result = {"plotly_json": json.loads(fig.to_json())}
         _cache[f"chart:{cache_key}"] = result
         return result
 
