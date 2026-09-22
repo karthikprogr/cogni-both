@@ -590,10 +590,14 @@ export default function Charts() {
         }));
         
         setAvailableDatasets(datasetObjects);
+        console.log("[Charts] Datasets loaded:", datasetObjects.length, "datasets");
         const current = datasetObjects.find(d => d.is_active) || datasetObjects[0];
         setCurrentDataset(current);
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("[Charts] Failed to load datasets:", err);
+        setAvailableDatasets([]);
+      })
       .finally(() => setLoadingDatasets(false));
   }, []);
 
@@ -619,7 +623,7 @@ export default function Charts() {
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
           {/* Dataset Selector */}
-          {!loadingDatasets && availableDatasets.length > 0 && (
+          {!loadingDatasets && (
             <div>
               <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>Active Dataset</div>
               <select 
@@ -634,6 +638,9 @@ export default function Charts() {
                   </option>
                 ))}
               </select>
+              {availableDatasets.length === 0 && (
+                <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 4 }}>No datasets uploaded</div>
+              )}
             </div>
           )}
         </div>
@@ -644,6 +651,7 @@ export default function Charts() {
     </Safe>
   );
 }
+
 
 
 
