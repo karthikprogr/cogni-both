@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, memo, useCallback } from "react";
+﻿import { useState, useEffect } from "react";
 import { api } from "../api/client";
 import { Component } from "react";
 
@@ -16,11 +16,10 @@ class Safe extends Component {
   }
 }
 
-// Chart Component using Plotly - Memoized to prevent unnecessary re-renders
-const Chart = memo(function Chart({ figure, height = 420 }) {
+// Chart Component using Plotly
+function Chart({ figure, height = 420 }) {
   const [Plot, setPlot] = useState(null);
   const [err, setErr] = useState(null);
-  const [isRendering, setIsRendering] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,63 +31,29 @@ const Chart = memo(function Chart({ figure, height = 420 }) {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    // Add timeout protection for large datasets
-    if (figure && Plot) {
-      setIsRendering(true);
-      const timer = setTimeout(() => setIsRendering(false), 100);
-      return () => clearTimeout(timer);
-    }
-  }, [figure, Plot]);
-
   if (!figure) return null;
   if (err) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Chart unavailable</div>;
   if (!Plot) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Loading…</div>;
-  if (isRendering) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Rendering chart…</div>;
-
-  // Limit data points for performance
-  const limitedFigure = {
-    ...figure,
-    data: figure.data?.map(trace => {
-      if (trace.x && trace.x.length > 10000) {
-        // Sample data if too large
-        const step = Math.ceil(trace.x.length / 10000);
-        return {
-          ...trace,
-          x: trace.x.filter((_, i) => i % step === 0),
-          y: trace.y?.filter((_, i) => i % step === 0),
-        };
-      }
-      return trace;
-    }) || []
-  };
 
   return (
     <Safe>
       <Plot
-        data={limitedFigure.data}
+        data={figure.data || []}
         layout={{
-          ...limitedFigure.layout,
+          ...figure.layout,
           paper_bgcolor: "transparent",
           plot_bgcolor: "transparent",
           font: { color: "#a1a1aa", family: "Inter,sans-serif", size: 11 },
           margin: { l: 40, r: 16, t: 30, b: 40 },
           height,
         }}
-        config={{ 
-          displayModeBar: false, 
-          responsive: true,
-          // Performance optimizations
-          staticPlot: false,
-          editable: false,
-          scrollZoom: false,
-        }}
+        config={{ displayModeBar: false, responsive: true }}
         style={{ width: "100%" }}
         useResizeHandler
       />
     </Safe>
   );
-});
+}
 
 const S = {
   page:       { padding: "20px 24px", background: "#09090b", minHeight: "100vh", color: "#e4e4e7", overflowY: "auto" },
@@ -112,38 +77,20 @@ function ChartsTab() {
   const [error, setError]    = useState("");
   const [explanation, setExplanation] = useState("");
   const [explainLoading, setExplainLoading] = useState(false);
-  const [loadingInfo, setLoadingInfo] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
     api.get("/data/info").then(({ data }) => {
-      if (!cancelled) {
-        setInfo(data);
-        const firstCol = data?.columns_info?.[0]?.name;
-        if (firstCol) { setXCol(firstCol); setYCol(firstCol); }
-        setLoadingInfo(false);
-      }
-    }).catch(e => {
-      if (!cancelled) {
-        setError("Failed to load dataset info: " + (e.response?.data?.detail || e.message));
-        setLoadingInfo(false);
-        setInfo({}); // Set empty object to stop loading state
-      }
+      setInfo(data);
+      const firstCol = data?.columns_info?.[0]?.name;
+      if (firstCol) { setXCol(firstCol); setYCol(firstCol); }
     });
-    return () => { cancelled = true; };
   }, []);
 
-  const buildChart = useCallback(async () => {
-    if (!xCol) {
-      setError("Please select X column");
-      return;
-    }
-    
+  const buildChart = async () => {
     setLoad(true);
     setError("");
     setChart(null);
     setExplanation("");
-    
     try {
       const typeMap = {
         "Stacked Bar": "stacked bar",
@@ -169,23 +116,20 @@ function ChartsTab() {
       };
       const effectiveType = typeMap[chartType] || chartType.toLowerCase();
       const effectiveY = yCol || xCol;
-      
       const { data } = await api.post("/viz/custom", {
         chart_type: effectiveType,
         x_col: xCol,
         y_col: effectiveY,
       });
-      
       setChart(data?.plotly_json || data);
     } catch(e) {
       const detail = e.response?.data?.detail || e.message || "Chart build failed";
       setError(detail);
-    } finally {
-      setLoad(false);
     }
-  }, [xCol, yCol, chartType]);
+    setLoad(false);
+  };
 
-  const handleExplain = useCallback(async () => {
+  const handleExplain = async () => {
     if (!chart) return;
     setExplainLoading(true);
     setExplanation("");
@@ -198,23 +142,12 @@ function ChartsTab() {
       setExplanation(data.explanation || "Chart explanation generated.");
     } catch (e) {
       setExplanation("Unable to generate explanation: " + (e.response?.data?.detail || e.message));
-    } finally {
-      setExplainLoading(false);
     }
-  }, [chart, chartType, xCol, yCol]);
+    setExplainLoading(false);
+  };
 
   const cols = info?.columns_info?.map(c => c.name) || [];
-  
-  if (loadingInfo) return <div style={S.empty}>Loading dataset…</div>;
-  if (cols.length === 0 && error) return (
-    <div>
-      <div style={{ ...S.card, color: "#f87171", background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.2)" }}>
-        ⚠ {error}
-      </div>
-      <div style={S.empty}>Please upload a dataset first or check if the backend is running.</div>
-    </div>
-  );
-  if (cols.length === 0) return <div style={S.empty}>No dataset loaded. Please upload a dataset first.</div>;
+  if (!info) return <div style={S.empty}>No dataset loaded</div>;
 
   return (
     <div>
@@ -264,20 +197,16 @@ function ChartsTab() {
             {cols.map(c => <option key={c}>{c}</option>)}
           </select>
         </div>
-        <button onClick={buildChart} disabled={loading} style={{...S.btn, opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer"}}>
+        <button onClick={buildChart} disabled={loading} style={{...S.btn, opacity: loading ? 0.6 : 1}}>
           {loading ? "⏳ Building..." : "📊 Build Chart"}
         </button>
       </div>
 
-      {error && !loadingInfo && (
-        <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>
-          {error}
-        </div>
-      )}
+      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>{error}</div>}
 
       {chart && (
         <div style={S.chartCard}>
-          <Chart figure={chart} height={420} />
+          <Safe><Chart figure={chart} height={420} /></Safe>
         </div>
       )}
 
@@ -345,7 +274,9 @@ export default function Charts() {
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
         </div>
-        <ChartsTab />
+        <Safe>
+          <ChartsTab />
+        </Safe>
       </div>
     </Safe>
   );
