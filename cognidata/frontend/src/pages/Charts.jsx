@@ -579,9 +579,18 @@ export default function Charts() {
     setLoadingDatasets(true);
     api.get("/data/datasets")
       .then(r => {
-        const datasets = r.data?.datasets || [];
-        setAvailableDatasets(datasets);
-        const current = datasets.find(d => d.is_active) || datasets[0];
+        // API returns: { datasets: ["name1", "name2"], active: "name1", details: [{...}] }
+        const datasetNames = r.data?.datasets || [];
+        const activeName = r.data?.active || "";
+        
+        // Convert to objects with name and is_active properties
+        const datasetObjects = datasetNames.map(name => ({
+          name: name,
+          is_active: name === activeName
+        }));
+        
+        setAvailableDatasets(datasetObjects);
+        const current = datasetObjects.find(d => d.is_active) || datasetObjects[0];
         setCurrentDataset(current);
       })
       .catch(() => {})
@@ -635,5 +644,6 @@ export default function Charts() {
     </Safe>
   );
 }
+
 
 
