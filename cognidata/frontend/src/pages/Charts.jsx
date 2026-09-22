@@ -67,7 +67,6 @@ const S = {
   empty:     { textAlign: "center", padding: "60px 20px", color: "#52525b", fontSize: 14 },
   chartCard: { background: "#18181b", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, overflow: "hidden" },
   chartTitle:{ fontSize: 12, fontWeight: 600, color: "#a1a1aa", padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,.05)" },
-  datasetSelector: { background: "#09090b", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "6px 12px", color: "#e4e4e7", fontSize: 13, cursor: "pointer", minWidth: 200 },
 };
 
 // Charts Tab Component
@@ -568,46 +567,6 @@ function ChartsTab() {
 }
 
 export default function Charts() {
-  // Dataset selector state
-  const [datasetNames, setDatasetNames] = useState([]);
-  const [activeDatasetName, setActiveDatasetName] = useState("");
-  const [loadingDatasets, setLoadingDatasets] = useState(false);
-  const [switchingDataset, setSwitchingDataset] = useState(false);
-
-  // Fetch available datasets on mount
-  useEffect(() => {
-    setLoadingDatasets(true);
-    api.get("/data/datasets")
-      .then(r => {
-        // API returns: { datasets: ["name1", "name2"], active: "name1" }
-        const names = r.data?.datasets || [];
-        const active = r.data?.active || "";
-        
-        setDatasetNames(names);
-        setActiveDatasetName(active);
-        console.log(`[Charts] Loaded ${names.length} datasets, active: ${active}`);
-      })
-      .catch((err) => {
-        console.error("[Charts] Failed to load datasets:", err);
-        setDatasetNames([]);
-        setActiveDatasetName("");
-      })
-      .finally(() => setLoadingDatasets(false));
-  }, []);
-
-  // Handle dataset switch
-  const switchDataset = async (datasetName) => {
-    if (datasetName === activeDatasetName) return;
-    setSwitchingDataset(true);
-    try {
-      await api.post(`/data/datasets/switch?name=${encodeURIComponent(datasetName)}`);
-      window.location.reload();
-    } catch(e) {
-      setSwitchingDataset(false);
-      alert("Failed to switch dataset: " + (e.response?.data?.detail || e.message));
-    }
-  };
-
   return (
     <Safe>
       <div style={S.page}>
@@ -616,32 +575,11 @@ export default function Charts() {
             <div style={S.title}>📊 Charts</div>
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
-          {/* Dataset Selector */}
-          <div>
-            {loadingDatasets ? (
-              <div style={{ fontSize: 11, color: "#71717a" }}>Loading datasets...</div>
-            ) : activeDatasetName ? (
-              <>
-                <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
-                  Active Dataset: <span style={{ color: "#22c55e", fontWeight: 600 }}>{activeDatasetName}</span>
-                </div>
-                {datasetNames.length > 1 && (
-                  <select
-                    style={S.datasetSelector}
-                    value={activeDatasetName}
-                    onChange={(e) => switchDataset(e.target.value)}
-                    disabled={switchingDataset}
-                  >
-                    {datasetNames.map(name => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </>
-            ) : (
-              <div style={{ fontSize: 11, color: "#f59e0b" }}>No dataset loaded</div>
-            )}
-          </div>
-
+        </div>
+        <Safe>
+          <ChartsTab />
+        </Safe>
+      </div>
+    </Safe>
+  );
+}
