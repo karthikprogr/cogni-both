@@ -112,6 +112,7 @@ function ChartsTab() {
   const [error, setError]    = useState("");
   const [explanation, setExplanation] = useState("");
   const [explainLoading, setExplainLoading] = useState(false);
+  const [loadingInfo, setLoadingInfo] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,9 +121,14 @@ function ChartsTab() {
         setInfo(data);
         const firstCol = data?.columns_info?.[0]?.name;
         if (firstCol) { setXCol(firstCol); setYCol(firstCol); }
+        setLoadingInfo(false);
       }
     }).catch(e => {
-      if (!cancelled) setError("Failed to load dataset info");
+      if (!cancelled) {
+        setError("Failed to load dataset info: " + (e.response?.data?.detail || e.message));
+        setLoadingInfo(false);
+        setInfo({}); // Set empty object to stop loading state
+      }
     });
     return () => { cancelled = true; };
   }, []);
@@ -198,8 +204,17 @@ function ChartsTab() {
   }, [chart, chartType, xCol, yCol]);
 
   const cols = info?.columns_info?.map(c => c.name) || [];
-  if (!info) return <div style={S.empty}>Loading dataset…</div>;
-  if (cols.length === 0) return <div style={S.empty}>No dataset loaded</div>;
+  
+  if (loadingInfo) return <div style={S.empty}>Loading dataset…</div>;
+  if (cols.length === 0 && error) return (
+    <div>
+      <div style={{ ...S.card, color: "#f87171", background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.2)" }}>
+        ⚠ {error}
+      </div>
+      <div style={S.empty}>Please upload a dataset first or check if the backend is running.</div>
+    </div>
+  );
+  if (cols.length === 0) return <div style={S.empty}>No dataset loaded. Please upload a dataset first.</div>;
 
   return (
     <div>
@@ -254,7 +269,11 @@ function ChartsTab() {
         </button>
       </div>
 
-      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>{error}</div>}
+      {error && !loadingInfo && (
+        <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>
+          {error}
+        </div>
+      )}
 
       {chart && (
         <div style={S.chartCard}>
