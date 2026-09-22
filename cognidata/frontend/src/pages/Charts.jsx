@@ -65,6 +65,8 @@ const S = {
   btn:        { padding: "8px 16px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   empty:      { textAlign: "center", padding: "60px 20px", color: "#52525b", fontSize: 14 },
   chartCard:  { background: "#18181b", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, overflow: "hidden" },
+  multiCol:   { background: "#18181b", border: "1px solid rgba(99,102,241,.2)", borderRadius: 8, padding: 10, marginTop: 8 },
+  colPill:    { display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(99,102,241,.15)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 6, padding: "4px 8px", margin: "2px 4px 2px 0", fontSize: 12, color: "#a5b4fc" },
 };
 
 function ChartsTab() {
@@ -77,6 +79,7 @@ function ChartsTab() {
   const [error, setError]    = useState("");
   const [explanation, setExplanation] = useState("");
   const [explainLoading, setExplainLoading] = useState(false);
+  const [selectedCols, setSelectedCols] = useState([]);
 
   useEffect(() => {
     api.get("/data/info").then(({ data }) => {
@@ -85,6 +88,12 @@ function ChartsTab() {
       if (firstCol) { setXCol(firstCol); setYCol(firstCol); }
     });
   }, []);
+
+  const toggleColumn = (col) => {
+    setSelectedCols(prev => 
+      prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+    );
+  };
 
   const buildChart = async () => {
     setLoad(true);
@@ -115,12 +124,25 @@ function ChartsTab() {
         "Animated Bubble": "animated bubble",
       };
       const effectiveType = typeMap[chartType] || chartType.toLowerCase();
-      const effectiveY = yCol || xCol;
-      const { data } = await api.post("/viz/custom", {
-        chart_type: effectiveType,
-        x_col: xCol,
-        y_col: effectiveY,
-      });
+      
+      let requestBody;
+      if (selectedCols.length >= 2) {
+        // Multi-column mode
+        requestBody = {
+          chart_type: effectiveType,
+          columns: selectedCols
+        };
+      } else {
+        // Single-column mode
+        const effectiveY = yCol || xCol;
+        requestBody = {
+          chart_type: effectiveType,
+          x_col: xCol,
+          y_col: effectiveY,
+        };
+      }
+
+      const { data } = await api.post("/viz/custom", requestBody);
       setChart(data?.plotly_json || data);
     } catch(e) {
       const detail = e.response?.data?.detail || e.message || "Chart build failed";
@@ -200,6 +222,55 @@ function ChartsTab() {
         <button onClick={buildChart} disabled={loading} style={{...S.btn, opacity: loading ? 0.6 : 1}}>
           {loading ? "⏳ Building..." : "📊 Build Chart"}
         </button>
+      </div>
+
+      {/* Multi-Column Selector */}
+      <div style={S.multiCol}>
+        <div style={{ fontSize: 11, color: "#71717a", marginBottom: 6 }}>
+          🎯 Multi-Column Analysis <span style={{ fontSize: 10, color: "#52525b", marginLeft: 6 }}>(Select 2+ columns for multi-series charts)</span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {cols.map(col => (
+            <label key={col} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={selectedCols.includes(col)}
+                onChange={() => toggleColumn(col)}
+                style={{ cursor: "pointer" }}
+              />
+              <span style={{ fontSize: 12, color: "#a1a1aa" }}>{col}</span>
+            </label>
+          ))}
+        </div>
+        {selectedCols.length > 0 && (
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,.05)" }}>
+            <div style={{ fontSize: 10, color: "#71717a", marginBottom: 4 }}>Selected ({selectedCols.length}):</div>
+            <div>
+              {selectedCols.map(col => (
+                <span key={col} style={S.colPill}>
+                  {col}
+                  <button
+                    onClick={() => toggleColumn(col)}
+                    style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", padding: 0, marginLeft: 2, fontSize: 14 }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={() => setSelectedCols([])}
+                style={{ fontSize: 11, color: "#71717a", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", marginLeft: 8 }}
+              >
+                Clear all
+              </button>
+            </div>
+          </div>
+        )}
+        {selectedCols.length === 1 && (
+          <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 6 }}>
+            ⚠️ Select at least 2 columns for multi-column mode
+          </div>
+        )}
       </div>
 
       {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>{error}</div>}
