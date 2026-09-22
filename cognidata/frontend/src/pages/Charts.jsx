@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+﻿import { useState, useEffect, memo, useCallback } from "react";
 import { api } from "../api/client";
 import { Component } from "react";
 
@@ -16,10 +16,11 @@ class Safe extends Component {
   }
 }
 
-// Chart Component using Plotly
-function Chart({ figure, height = 420 }) {
+// Chart Component using Plotly - Memoized to prevent unnecessary re-renders
+const Chart = memo(function Chart({ figure, height = 420 }) {
   const [Plot, setPlot] = useState(null);
   const [err, setErr] = useState(null);
+  const [isRendering, setIsRendering] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,29 +32,63 @@ function Chart({ figure, height = 420 }) {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    // Add timeout protection for large datasets
+    if (figure && Plot) {
+      setIsRendering(true);
+      const timer = setTimeout(() => setIsRendering(false), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [figure, Plot]);
+
   if (!figure) return null;
   if (err) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Chart unavailable</div>;
   if (!Plot) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Loading…</div>;
+  if (isRendering) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Rendering chart…</div>;
+
+  // Limit data points for performance
+  const limitedFigure = {
+    ...figure,
+    data: figure.data?.map(trace => {
+      if (trace.x && trace.x.length > 10000) {
+        // Sample data if too large
+        const step = Math.ceil(trace.x.length / 10000);
+        return {
+          ...trace,
+          x: trace.x.filter((_, i) => i % step === 0),
+          y: trace.y?.filter((_, i) => i % step === 0),
+        };
+      }
+      return trace;
+    }) || []
+  };
 
   return (
     <Safe>
       <Plot
-        data={figure.data || []}
+        data={limitedFigure.data}
         layout={{
-          ...figure.layout,
+          ...limitedFigure.layout,
           paper_bgcolor: "transparent",
           plot_bgcolor: "transparent",
           font: { color: "#a1a1aa", family: "Inter,sans-serif", size: 11 },
           margin: { l: 40, r: 16, t: 30, b: 40 },
           height,
         }}
-        config={{ displayModeBar: false, responsive: true }}
+        config={{ 
+          displayModeBar: false, 
+          responsive: true,
+          // Performance optimizations
+          staticPlot: false,
+          editable: false,
+          scrollZoom: false,
+        }}
         style={{ width: "100%" }}
         useResizeHandler
       />
     </Safe>
   );
-}
+});
 
 const S = {
   page:       { padding: "20px 24px", background: "#09090b", minHeight: "100vh", color: "#e4e4e7", overflowY: "auto" },
@@ -79,18 +114,30 @@ function ChartsTab() {
   const [explainLoading, setExplainLoading] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     api.get("/data/info").then(({ data }) => {
-      setInfo(data);
-      const firstCol = data?.columns_info?.[0]?.name;
-      if (firstCol) { setXCol(firstCol); setYCol(firstCol); }
+      if (!cancelled) {
+        setInfo(data);
+        const firstCol = data?.columns_info?.[0]?.name;
+        if (firstCol) { setXCol(firstCol); setYCol(firstCol); }
+      }
+    }).catch(e => {
+      if (!cancelled) setError("Failed to load dataset info");
     });
+    return () => { cancelled = true; };
   }, []);
 
-  const buildChart = async () => {
+  const buildChart = useCallback(async () => {
+    if (!xCol) {
+      setError("Please select X column");
+      return;
+    }
+    
     setLoad(true);
     setError("");
     setChart(null);
     setExplanation("");
+    
     try {
       const typeMap = {
         "Stacked Bar": "stacked bar",
@@ -116,20 +163,23 @@ function ChartsTab() {
       };
       const effectiveType = typeMap[chartType] || chartType.toLowerCase();
       const effectiveY = yCol || xCol;
+      
       const { data } = await api.post("/viz/custom", {
         chart_type: effectiveType,
         x_col: xCol,
         y_col: effectiveY,
       });
+      
       setChart(data?.plotly_json || data);
     } catch(e) {
       const detail = e.response?.data?.detail || e.message || "Chart build failed";
       setError(detail);
+    } finally {
+      setLoad(false);
     }
-    setLoad(false);
-  };
+  }, [xCol, yCol, chartType]);
 
-  const handleExplain = async () => {
+  const handleExplain = useCallback(async () => {
     if (!chart) return;
     setExplainLoading(true);
     setExplanation("");
@@ -142,12 +192,14 @@ function ChartsTab() {
       setExplanation(data.explanation || "Chart explanation generated.");
     } catch (e) {
       setExplanation("Unable to generate explanation: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setExplainLoading(false);
     }
-    setExplainLoading(false);
-  };
+  }, [chart, chartType, xCol, yCol]);
 
   const cols = info?.columns_info?.map(c => c.name) || [];
-  if (!info) return <div style={S.empty}>No dataset loaded</div>;
+  if (!info) return <div style={S.empty}>Loading dataset…</div>;
+  if (cols.length === 0) return <div style={S.empty}>No dataset loaded</div>;
 
   return (
     <div>
@@ -197,7 +249,7 @@ function ChartsTab() {
             {cols.map(c => <option key={c}>{c}</option>)}
           </select>
         </div>
-        <button onClick={buildChart} disabled={loading} style={{...S.btn, opacity: loading ? 0.6 : 1}}>
+        <button onClick={buildChart} disabled={loading} style={{...S.btn, opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer"}}>
           {loading ? "⏳ Building..." : "📊 Build Chart"}
         </button>
       </div>
@@ -206,7 +258,7 @@ function ChartsTab() {
 
       {chart && (
         <div style={S.chartCard}>
-          <Safe><Chart figure={chart} height={420} /></Safe>
+          <Chart figure={chart} height={420} />
         </div>
       )}
 
@@ -274,9 +326,7 @@ export default function Charts() {
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
         </div>
-        <Safe>
-          <ChartsTab />
-        </Safe>
+        <ChartsTab />
       </div>
     </Safe>
   );
