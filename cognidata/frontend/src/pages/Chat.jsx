@@ -4,6 +4,9 @@ import { useStreamingChat } from "../hooks/useStreamingChat";
 import useAuth from "../store/auth";
 import FileUpload from "../components/FileUpload";
 import ChatMessage from "../components/ChatMessage";
+import ChatSidebar from "../components/ChatSidebar";
+import { useChatSessions } from "../hooks/useChatSessions";
+import "../lib/toast"; // Initialize toast notification system
 
 const EXAMPLE_QUESTIONS = {
   "Data & Charts": [
@@ -43,23 +46,128 @@ export default function Chat() {
   const [listening, setListening] = useState(false);
   // Image upload
   const [imageFile, setImageFile] = useState(null);
+  // Sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const imageRef                  = useRef();
   const bottomRef                 = useRef();
   const taRef                     = useRef();
+  const isSendingRef = useRef(false); // Track if actively sending message
   const { token }                 = useAuth();
   const { connect, sendStreaming, streaming } = useStreamingChat();
+  
+  // Chat session management
+  const {
+    sessions,
+    activeSessionId,
+    loading: sessionsLoading,
+    sessionCache,
+    hasMore,
+    createNewSession,
+    selectSession,
+    renameSession,
+    archiveSession,
+    addMessage,
+    loadMoreSessions,
+  } = useChatSessions();
 
   // Connect WebSocket on mount
   useEffect(() => {
     if (token) connect(token).catch(() => {});
   }, [token]);
 
+  // Create initial session if none exists
+  useEffect(() => {
+    if (token && !activeSessionId && !sessionsLoading && sessions.length === 0) {
+      createNewSession().catch(err => console.error('Failed to create initial session:', err));
+    }
+  }, [token, activeSessionId, sessionsLoading, sessions.length, createNewSession]);
+
+  // Load session messages when activeSessionId changes (but not during active message sending)
+  useEffect(() => {
+    if (!activeSessionId || isSendingRef.current) return; // Don't reload during message send
+    
+    const loadSessionMessages = async () => {
+      try {
+        const messages = sessionCache.get(activeSessionId);
+        if (messages && Array.isArray(messages)) {
+          // Transform database message format to UI format
+          const uiMessages = messages.map(msg => ({
+            role: msg.role,
+            content: msg.message_metadata || msg.content
+          }));
+          // Always update messages from cache (even if empty array)
+          setMsgs(uiMessages);
+        } else {
+          // Load from API if not in cache
+          const loadedMessages = await selectSession(activeSessionId);
+          if (loadedMessages && Array.isArray(loadedMessages)) {
+            const uiMessages = loadedMessages.map(msg => ({
+              role: msg.role,
+              content: msg.message_metadata || msg.content
+            }));
+            // Always update messages from API
+            setMsgs(uiMessages);
+          } else {
+            // Only clear if this is a session switch, not during active chat
+            if (msgs.length === 0) {
+              setMsgs([]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load session messages:", error);
+        // setMsgs([]); // FIXED: Don't clear active chat
+      }
+    };
+
+    loadSessionMessages();
+  }, [activeSessionId]); // FIXED: Removed sessionCache to prevent reload during active chat
+
   const send = async (q) => {
     const msg = (q || query).trim(); if (!msg || loading) return;
+    
+    // Check message limit
+    const currentSession = sessions.find(s => s.id === activeSessionId);
+    if (currentSession && currentSession.message_count >= 100) {
+      if (window.showToast) {
+        window.showToast("warning", "Session limit reached (100 messages). Please start a new chat.");
+      }
+      return;
+    }
+    
+    // Show warning when approaching limit
+    if (currentSession && currentSession.message_count >= 90) {
+      if (window.showToast) {
+        window.showToast("info", `Approaching session limit: ${currentSession.message_count}/100 messages`);
+      }
+    }
+    
+    isSendingRef.current = true; // Mark as sending
     setQuery("");
     setMsgs(p => [...p, { role:"user", content:msg }]);
     setLoad(true);
     const t0 = Date.now();
+
+    // Save user message to database
+    try {
+      if (activeSessionId) {
+        await addMessage(activeSessionId, "user", msg);
+      }
+    } catch (error) {
+      if (error.message === "MESSAGE_LIMIT_REACHED") {
+        // Create new session and continue
+        try {
+          const newSession = await createNewSession();
+          if (newSession?.id) {
+            await addMessage(newSession.id, "user", msg);
+          }
+        } catch (err) {
+          console.error("Failed to create new session:", err);
+        }
+      } else {
+        console.error("Failed to save user message:", error);
+      }
+    }
 
     setMsgs(p => [...p, { role:"assistant", content:{ type:"text", data:"", task_type:"insight", status:"success" }, streaming: true }]);
 
@@ -87,6 +195,14 @@ export default function Chat() {
             setTurnCount(c => c + 1);
             setTotalMs(ms => ms + elapsed);
             setLoad(false);
+        isSendingRef.current = false; // Mark send complete
+            
+            // Save assistant response to database
+            if (activeSessionId) {
+              addMessage(activeSessionId, "assistant", typeof result === "string" ? result : JSON.stringify(result), result).catch(err => {
+                console.error("Failed to save assistant message:", err);
+              });
+            }
           },
           () => {
             aiApi.chat(msg).then(({ data }) => {
@@ -96,7 +212,14 @@ export default function Chat() {
               ));
               setTurnCount(c => c + 1);
               setTotalMs(ms => ms + elapsed);
-            }).finally(() => setLoad(false));
+              
+              // Save assistant response to database
+              if (activeSessionId) {
+                addMessage(activeSessionId, "assistant", typeof data === "string" ? data : JSON.stringify(data), data).catch(err => {
+                  console.error("Failed to save assistant message:", err);
+                });
+              }
+            }).finally(() => { setLoad(false); isSendingRef.current = false; }); // Mark send complete
           }
         );
       } else {
@@ -108,6 +231,14 @@ export default function Chat() {
         setTurnCount(c => c + 1);
         setTotalMs(ms => ms + elapsed);
         setLoad(false);
+        isSendingRef.current = false; // Mark send complete
+        
+        // Save assistant response to database
+        if (activeSessionId) {
+          addMessage(activeSessionId, "assistant", typeof data === "string" ? data : JSON.stringify(data), data).catch(err => {
+            console.error("Failed to save assistant message:", err);
+          });
+        }
       }
     } catch (e) {
       setMsgs(p => p.map((m, i) =>
@@ -146,9 +277,20 @@ export default function Chat() {
     if (!imageFile && !query.trim()) return;
     const q = query.trim() || "Analyze this image";
     setQuery("");
-    setMsgs(p => [...p, { role:"user", content: imageFile ? `[Image: ${imageFile.name}] ${q}` : q }]);
+    const userMsg = imageFile ? `[Image: ${imageFile.name}] ${q}` : q;
+    setMsgs(p => [...p, { role:"user", content: userMsg }]);
     setLoad(true);
     const t0 = Date.now();
+    
+    // Save user message to database
+    try {
+      if (activeSessionId) {
+        await addMessage(activeSessionId, "user", userMsg);
+      }
+    } catch (error) {
+      console.error("Failed to save user message:", error);
+    }
+    
     try {
       const formData = new FormData();
       formData.append("question", q);
@@ -160,6 +302,13 @@ export default function Chat() {
       setMsgs(p => [...p, { role:"assistant", content: data }]);
       setTurnCount(c => c + 1);
       setTotalMs(ms => ms + (Date.now() - t0));
+      
+      // Save assistant response to database
+      if (activeSessionId) {
+        addMessage(activeSessionId, "assistant", typeof data === "string" ? data : JSON.stringify(data), data).catch(err => {
+          console.error("Failed to save assistant message:", err);
+        });
+      }
     } catch(e) {
       setMsgs(p => [...p, { role:"assistant", content: { type:"error", error: e.response?.data?.detail || "Vision failed" } }]);
     } finally {
@@ -175,12 +324,54 @@ export default function Chat() {
     await aiApi.clearMemory().catch(() => {});
   };
 
+  // Session management handlers
+  const handleNewChat = async () => {
+    try {
+      await createNewSession();
+      setMsgs([]);
+      setTurnCount(0);
+      setTotalMs(0);
+    } catch (error) {
+      console.error("Failed to create new session:", error);
+    }
+  };
+
+  const handleSelectSession = async (sessionId) => {
+    try {
+      await selectSession(sessionId);
+      // Messages will be loaded by the useEffect hook
+      setTurnCount(0);
+      setTotalMs(0);
+    } catch (error) {
+      console.error("Failed to select session:", error);
+    }
+  };
+
+  const handleRenameSession = async (sessionId, newTitle) => {
+    try {
+      await renameSession(sessionId, newTitle);
+    } catch (error) {
+      console.error("Failed to rename session:", error);
+    }
+  };
+
+  const handleArchiveSession = async (sessionId) => {
+    try {
+      await archiveSession(sessionId);
+      setMsgs([]);
+      setTurnCount(0);
+      setTotalMs(0);
+    } catch (error) {
+      console.error("Failed to archive session:", error);
+    }
+  };
+
   // Build memory turns from msgs
   const memoryTurns = [];
   for (let i = 0; i < msgs.length - 1; i++) {
     if (msgs[i].role === "user" && msgs[i+1]?.role === "assistant") {
       const resp = msgs[i+1].content;
-      const respText = typeof resp === "string" ? resp : (resp?.data || resp?.error || JSON.stringify(resp)).slice(0, 80);
+      const respText = typeof resp === "string" ? resp : String(resp?.data || resp?.error || JSON.stringify(resp) || "No response").slice(0, 80);
       memoryTurns.push({ q: msgs[i].content, a: respText });
     }
   }
@@ -189,7 +380,21 @@ export default function Chat() {
   const avgMs = turnCount > 0 ? Math.round(totalMs / turnCount) : 0;
 
   return (
-    <div style={{ display:"flex",flexDirection:"column",height:"100vh",background:"#09090b" }}>
+    <div style={{ display:"flex",flexDirection:"column",height:"100vh",background:"#09090b",position:"relative" }}>
+      {/* Chat Sidebar */}
+      <ChatSidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onNewChat={handleNewChat}
+        onSelectSession={handleSelectSession}
+        onRenameSession={handleRenameSession}
+        onArchiveSession={handleArchiveSession}
+        onLoadMore={loadMoreSessions}
+        hasMore={hasMore}
+      />
+
       {/* Header */}
       <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 24px",borderBottom:"1px solid rgba(255,255,255,.06)",background:"rgba(9,9,11,.95)",backdropFilter:"blur(12px)",flexWrap:"wrap",gap:12,flexShrink:0 }}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
@@ -224,6 +429,14 @@ export default function Chat() {
 
       {/* Collapsible panels row */}
       <div style={{ display:"flex",gap:8,padding:"8px 24px",borderBottom:"1px solid rgba(255,255,255,.04)",background:"rgba(9,9,11,.8)",flexShrink:0 }}>
+        {/* Chat History button */}
+        <div style={{ flex:1 }}>
+          <button onClick={() => setSidebarOpen(true)}
+            style={{ fontSize:11,color:"#52525b",background:"transparent",border:"1px solid rgba(255,255,255,.06)",borderRadius:6,padding:"4px 10px",cursor:"pointer",display:"flex",alignItems:"center",gap:4 }}>
+            ☰ Chat History ▼
+          </button>
+        </div>
+
         {/* Example questions panel */}
         <div style={{ flex:1 }}>
           <button onClick={() => setShowEx(s => !s)}
@@ -292,6 +505,28 @@ export default function Chat() {
 
       {/* Input */}
       <div style={{ padding:"12px 24px 16px",borderBottom:"none",borderTop:"1px solid rgba(255,255,255,.06)",background:"rgba(9,9,11,.95)",backdropFilter:"blur(12px)",flexShrink:0 }}>
+        {/* Message limit warning */}
+        {(() => {
+          const currentSession = sessions.find(s => s.id === activeSessionId);
+          if (currentSession && currentSession.message_count >= 100) {
+            return (
+              <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"8px 12px",background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.3)",borderRadius:8 }}>
+                <span style={{ fontSize:12,color:"#f87171" }}>⚠️ Session limit reached (100 messages). Please start a new chat.</span>
+                <button onClick={handleNewChat} style={{ padding:"4px 12px",borderRadius:6,background:"#ef4444",color:"white",border:"none",cursor:"pointer",fontSize:11,fontWeight:500 }}>
+                  New Chat
+                </button>
+              </div>
+            );
+          } else if (currentSession && currentSession.message_count >= 90) {
+            return (
+              <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"6px 10px",background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.3)",borderRadius:8 }}>
+                <span style={{ fontSize:11,color:"#fbbf24" }}>⚠️ Approaching limit: {currentSession.message_count}/100 messages</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
+        
         {/* Image preview */}
         {imageFile && (
           <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"6px 10px",background:"rgba(99,102,241,.08)",border:"1px solid rgba(99,102,241,.2)",borderRadius:8 }}>
@@ -315,13 +550,21 @@ export default function Chat() {
             {listening ? "🔴" : "🎤"}
           </button>
           {/* Send button — vision if image attached, else normal */}
-          <button onClick={imageFile ? sendVision : () => send()} disabled={loading||(!query.trim()&&!imageFile)}
-            style={{ width:36,height:36,borderRadius:10,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,opacity:loading||(!query.trim()&&!imageFile)?0.4:1,boxShadow:"0 2px 12px rgba(99,102,241,.35)" }}>
+          <button onClick={imageFile ? sendVision : () => send()} disabled={loading||(!query.trim()&&!imageFile)||(sessions.find(s => s.id === activeSessionId)?.message_count >= 100)}
+            style={{ width:36,height:36,borderRadius:10,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,opacity:loading||(!query.trim()&&!imageFile)||(sessions.find(s => s.id === activeSessionId)?.message_count >= 100)?0.4:1,boxShadow:"0 2px 12px rgba(99,102,241,.35)" }}>
             {loading ? <span className="spinner" style={{ width:16,height:16 }} /> : imageFile ? "👁" : "↑"}
           </button>
         </div>
         <p style={{ fontSize:11,color:"#27272a",marginTop:6,textAlign:"center" }}>Enter to send · Shift+Enter for new line · 🎤 voice · 📎 image+vision</p>
       </div>
+
+      {/* Responsive styles */}
+      <style>{`
+        @keyframes dotPulse {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
