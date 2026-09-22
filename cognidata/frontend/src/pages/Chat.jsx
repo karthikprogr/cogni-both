@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+﻿import { useRef, useState, useCallback, useEffect } from "react";
 import { aiApi, api } from "../api/client";
 import { useStreamingChat } from "../hooks/useStreamingChat";
 import useAuth from "../store/auth";
@@ -325,3 +325,4 @@ export default function Chat() {
     </div>
   );
 }
+
