@@ -136,7 +136,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             return result
 
 
-
+
         kwargs = dict(title=req.title, template="plotly_dark")
         if req.color and req.color in df.columns:
             kwargs["color"] = req.color
