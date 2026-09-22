@@ -83,6 +83,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
         df = df.sample(n=MAX_ROWS, random_state=42).reset_index(drop=True)
 
     try:
+        ct = req.chart_type.lower()
         # === MULTI-COLUMN MODE ===
         # If columns array is provided with 2+ columns, create a multi-column visualization
         if req.columns and len(req.columns) >= 2:
@@ -98,7 +99,6 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             multi_df = df[req.columns].copy()
             
             # Auto-detect chart type or use parallel coordinates as default
-            ct = req.chart_type.lower()
             if ct in ("bar", "line", "scatter"):
                 # For standard charts, use first column as x, rest as multiple y series
                 fig = go.Figure()
