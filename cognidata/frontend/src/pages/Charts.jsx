@@ -573,26 +573,22 @@ export default function Charts() {
   const [activeDatasetName, setActiveDatasetName] = useState("");
   const [loadingDatasets, setLoadingDatasets] = useState(false);
   const [switchingDataset, setSwitchingDataset] = useState(false);
-  const [datasetError, setDatasetError] = useState(null);
-  const [debugInfo, setDebugInfo] = useState("");
 
   // Fetch available datasets on mount
   useEffect(() => {
-    console.log("[Charts] Fetching datasets from /data/datasets");
     setLoadingDatasets(true);
     api.get("/data/datasets")
       .then(r => {
-        console.log("[Charts] Raw API response:", r.data);
-        setDebugInfo(JSON.stringify(r.data, null, 2));
-        // API returns: { datasets: ["name1", "name2"], active: "name1", details: [{...}] }
+        // API returns: { datasets: ["name1", "name2"], active: "name1" }
         const names = r.data?.datasets || [];
         const active = r.data?.active || "";
+        
         setDatasetNames(names);
         setActiveDatasetName(active);
         console.log(`[Charts] Loaded ${names.length} datasets, active: ${active}`);
+      })
       .catch((err) => {
         console.error("[Charts] Failed to load datasets:", err);
-        setDatasetError(err.response?.data?.detail || err.message || "Failed to load datasets");
         setDatasetNames([]);
         setActiveDatasetName("");
       })
@@ -617,46 +613,28 @@ export default function Charts() {
       <div style={S.page}>
         <div style={S.header}>
           <div>
-            <div style={S.title}>📊 Charts</div>
+            <div style={S.title}>?? Charts</div>
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
           {/* Dataset Selector */}
-                    {!loadingDatasets && activeDatasetName && (
-                      <div>
-                        <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
-                          Active Dataset: <span style={{ color: "#22c55e", fontWeight: 600 }}>{activeDatasetName}</span>
-                        </div>
-                        {datasetNames.length > 1 && (
-                          <select
-                            style={S.datasetSelector}
-                            value={activeDatasetName}
-                            onChange={(e) => switchDataset(e.target.value)}
-                            disabled={switchingDataset}
-                          >
-                            {datasetNames.map(name => (
-                              <option key={name} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
-                    )}
-                disabled={switchingDataset}
-              >
-                {availableDatasets.map(ds => (
-                  <option key={ds.name} value={ds.name}>
-                    {ds.name} {ds.is_active ? "(active)" : ""}
-                  </option>
-                ))}
-              </select>
-              {availableDatasets.length === 0 && !datasetError && (
-                <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 4 }}>No datasets uploaded</div>
-              )}
-              {datasetError && (
-                <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4, padding: "4px 8px", background: "rgba(239,68,68,.1)", borderRadius: 4 }}>
-                  Error: {datasetError}
-                </div>
+          {!loadingDatasets && activeDatasetName && (
+            <div>
+              <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
+                Active Dataset: <span style={{ color: "#22c55e", fontWeight: 600 }}>{activeDatasetName}</span>
+              </div>
+              {datasetNames.length > 1 && (
+                <select 
+                  style={S.datasetSelector}
+                  value={activeDatasetName}
+                  onChange={(e) => switchDataset(e.target.value)}
+                  disabled={switchingDataset}
+                >
+                  {datasetNames.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
               )}
             </div>
           )}
@@ -668,15 +646,3 @@ export default function Charts() {
     </Safe>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
