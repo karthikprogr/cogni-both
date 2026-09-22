@@ -1,4 +1,4 @@
-﻿import sys, pathlib
+import sys, pathlib
 import pandas as pd
 from fastapi import APIRouter, Depends
 from app.core.deps import get_current_user
@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 router = APIRouter(prefix="/viz", tags=["Visualization"])
 
-# Bootstrap once at module load time â€” not on every request
+# Bootstrap once at module load time — not on every request
 _services_path = str(pathlib.Path(__file__).resolve().parents[3] / "services")
 if _services_path not in sys.path:
     sys.path.insert(0, _services_path)
@@ -66,9 +66,9 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
     x = req.x or req.x_col
     y = req.y or req.y_col
 
-    # â”€â”€ Result cache: same user + same params + same dataset shape â†’ return cached â”€â”€
+    # ── Result cache: same user + same params + same dataset shape → return cached ──
     cache_key = hashlib.md5(
-        f"{user['sub']}:{req.chart_type}:{x}:{y}:{req.color}:{req.size}:{len(df)}:{list(df.columns)}".encode()
+        f"{user['email']}:{req.chart_type}:{x}:{y}:{req.color}:{req.size}:{len(df)}:{list(df.columns)}".encode()
     ).hexdigest()
     from app.services.data_store import get_ai_cache
     _cache = get_ai_cache()
@@ -76,7 +76,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
     if cached:
         return cached
 
-    # â”€â”€ Sample large datasets for faster rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Sample large datasets for faster rendering ────────────────────────────
     MAX_ROWS = 5000
     if len(df) > MAX_ROWS:
         df = df.sample(n=MAX_ROWS, random_state=42).reset_index(drop=True)
@@ -144,7 +144,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             import numpy as np
             size_col = req.size or y
             if size_col and size_col in df.columns and pd.api.types.is_numeric_dtype(df[size_col]):
-                # Plotly requires size >= 0 â€” shift negative values up
+                # Plotly requires size >= 0 — shift negative values up
                 size_vals = df[size_col].fillna(0)
                 mn = size_vals.min()
                 if mn < 0:
@@ -201,13 +201,13 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             def sparkline(series):
                 mn, mx = series.min(), series.max()
                 rng = mx - mn or 1
-                bars = "â–â–‚â–ƒâ–„â–…â–†â–‡â–ˆ"
+                bars = "▁▂▃▄▅▆▇█"
                 return "".join(bars[int((v - mn) / rng * 7)] for v in series.dropna().head(10))
             header_vals = list(display_cols)
             cell_vals = []
             for col in display_cols:
                 if pd.api.types.is_numeric_dtype(df[col]):
-                    cell_vals.append([f"{v:.2f}" if pd.notna(v) else "â€”" for v in sample[col]])
+                    cell_vals.append([f"{v:.2f}" if pd.notna(v) else "—" for v in sample[col]])
                 else:
                     cell_vals.append([str(v)[:20] for v in sample[col]])
             # Add sparkline row for numeric cols
@@ -244,7 +244,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             else:
                 fig = px.area(df, x=x, y=y, **kwargs)
 
-        # â”€â”€ 2026 Trending Chart Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 2026 Trending Chart Types ─────────────────────────────────────────
         elif ct in ("sankey", "alluvial", "flow"):
             # Alluvial / Sankey Flow Diagram
             import plotly.graph_objects as go
@@ -276,7 +276,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                 fig = px.bar(df, x=x, y=y, **kwargs)
 
         elif ct in ("beeswarm", "bee swarm", "strip"):
-            # Beeswarm / Strip Plot â€” individual data points without overlap
+            # Beeswarm / Strip Plot — individual data points without overlap
             import plotly.graph_objects as go
             import numpy as np
             num_col = y if y and y in df.columns else x
@@ -297,7 +297,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                                   yaxis_title=num_col)
 
         elif ct in ("bullet", "bullet chart", "kpi bullet"):
-            # Bullet Chart â€” actual vs target vs performance range
+            # Bullet Chart — actual vs target vs performance range
             import plotly.graph_objects as go
             import numpy as np
             num_cols = df.select_dtypes(include=np.number).columns.tolist()[:6]
@@ -416,7 +416,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             )
 
         elif ct in ("network", "network graph", "graph", "force graph"):
-            # Network Graph â€” relationship visualization using scatter + lines
+            # Network Graph — relationship visualization using scatter + lines
             import plotly.graph_objects as go
             import numpy as np
             cat_cols = df.select_dtypes(include="object").columns.tolist()
@@ -491,7 +491,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
 
         elif ct in ("gantt", "gantt chart", "timeline", "project timeline"):
-            # Gantt Chart â€” project/task timeline
+            # Gantt Chart — project/task timeline
             import plotly.graph_objects as go
             import numpy as np
             # Try to find task, start, end columns by name heuristics
@@ -534,9 +534,9 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                     yaxis=dict(autorange="reversed"),
                 )
 
-        # â”€â”€ Ultra-Advanced / AI-Era Chart Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Ultra-Advanced / AI-Era Chart Types ──────────────────────────────
         elif ct in ("parallel coordinates", "parallel coords", "parallel"):
-            # Parallel Coordinates â€” high-dimensional data, each line = one record
+            # Parallel Coordinates — high-dimensional data, each line = one record
             import numpy as np
             num_cols = df.select_dtypes(include=np.number).columns.tolist()[:12]
             if not num_cols:
@@ -581,7 +581,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             else:
                 fig = px.bar(df, x=x, y=y, **kwargs)
 
-        # â”€â”€ Advanced / AI-Era Chart Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Advanced / AI-Era Chart Types ─────────────────────────────────────
         elif ct in ("parallel coordinates", "parallel coords", "parallel"):
             import numpy as np, plotly.graph_objects as go
             num_cols = df.select_dtypes(include=np.number).columns.tolist()[:12]
@@ -835,7 +835,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                     x=imp[idx], y=[features[i] for i in idx], orientation="h",
                     marker=dict(color=imp[idx], colorscale="Plasma"),
                 ))
-                fig.update_layout(title=f"{req.title} â€” Feature Importance",
+                fig.update_layout(title=f"{req.title} — Feature Importance",
                                   template="plotly_dark",
                                   xaxis_title="Importance", yaxis_title="Feature")
             else:
