@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, memo } from "react";
+﻿import { useState, useEffect, useCallback, memo, useMemo } from "react";
 import { api } from "../api/client";
 import { Component } from "react";
 
@@ -78,6 +78,18 @@ function ChartsTab() {
   const [chart, setChart]    = useState(null);
   const [loading, setLoad]   = useState(false);
   const [error, setError]    = useState("");
+  
+  // Multi-column selector state
+  const [selectedCols, setSelectedCols] = useState([]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  
+  // Validation logic with useMemo
+  const validation = useMemo(() => {
+    if (selectedCols.length === 0) return { valid: true, error: "" };
+    if (selectedCols.length === 1) return { valid: false, error: "Select at least 2 columns for multi-column mode" };
+    if (selectedCols.length > 10) return { valid: false, error: "Maximum 10 columns allowed" };
+    return { valid: true, error: "" };
+  }, [selectedCols.length]);
   
   const TYPES = [
     // Classic
@@ -193,12 +205,26 @@ function ChartsTab() {
         "Animated Bubble": "animated bubble",
       };
       const effectiveType = typeMap[chartType] || chartType;
-      const effectiveY = yCol || xCol;
-      const { data } = await api.post("/viz/custom", {
-        chart_type: effectiveType,
-        x_col: xCol,
-        y_col: effectiveY,
-      });
+      
+      // Build request based on mode
+      let requestBody;
+      if (selectedCols.length >= 2) {
+        // Multi-column mode
+        requestBody = {
+          chart_type: effectiveType,
+          columns: selectedCols
+        };
+      } else {
+        // Single-column mode (original behavior)
+        const effectiveY = yCol || xCol;
+        requestBody = {
+          chart_type: effectiveType,
+          x_col: xCol,
+          y_col: effectiveY
+        };
+      }
+      
+      const { data } = await api.post("/viz/custom", requestBody);
       setChart(data?.plotly_json || data);
     } catch(e) {
       const detail = e.response?.data?.detail || e.message || "Chart build failed";
@@ -264,11 +290,162 @@ function ChartsTab() {
             {cols.map(c => <option key={c}>{c}</option>)}
           </select>
         </div>
-        <button onClick={build} disabled={loading || !xCol} style={S.btn}>
+        <div style={{ flex: "1 1 100%", marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
+            Additional Columns
+          </div>
+          {/* Multi-column selector */}
+          <div
+            style={{
+              background: "#09090b",
+              border: "1px solid rgba(255,255,255,.1)",
+              borderRadius: 8,
+              padding: "8px 12px",
+              minHeight: 42,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 6,
+              cursor: "pointer",
+              position: "relative"
+            }}
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+          >
+            {/* Selected Column Chips */}
+            {selectedCols.map(col => (
+              <span
+                key={col}
+                style={{
+                  background: "rgba(99,102,241,.1)",
+                  color: "#e4e4e7",
+                  fontSize: 13,
+                  borderRadius: 6,
+                  padding: "4px 8px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6
+                }}
+              >
+                {col}
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedCols(prev => prev.filter(c => c !== col));
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    opacity: 0.6,
+                    fontSize: 14,
+                    lineHeight: 1,
+                    transition: "opacity 0.15s"
+                  }}
+                  onMouseEnter={(e) => e.target.style.opacity = 1}
+                  onMouseLeave={(e) => e.target.style.opacity = 0.6}
+                >
+                  ×
+                </span>
+              </span>
+            ))}
+            
+            {/* Placeholder text when empty */}
+            {selectedCols.length === 0 && (
+              <span style={{ color: "#52525b", fontSize: 13 }}>
+                Select columns for multi-column charts
+              </span>
+            )}
+            
+            {/* Dropdown Icon */}
+            <span style={{ marginLeft: "auto", color: "#71717a", fontSize: 12 }}>
+              {dropdownOpen ? "▲" : "▼"}
+            </span>
+            
+            {/* Dropdown Menu */}
+            {dropdownOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  marginTop: 4,
+                  background: "#18181b",
+                  border: "1px solid rgba(255,255,255,.1)",
+                  borderRadius: 8,
+                  maxHeight: 240,
+                  overflowY: "auto",
+                  zIndex: 1000
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {cols.filter(c => !selectedCols.includes(c)).length === 0 ? (
+                  <div style={{ padding: "8px 12px", fontSize: 13, color: "#52525b" }}>
+                    No more columns available
+                  </div>
+                ) : (
+                  cols.filter(c => !selectedCols.includes(c)).map(col => (
+                    <div
+                      key={col}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (selectedCols.length < 10) {
+                          setSelectedCols(prev => [...prev, col]);
+                        }
+                        setDropdownOpen(false);
+                      }}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 13,
+                        color: "#e4e4e7",
+                        cursor: "pointer",
+                        transition: "background 0.15s"
+                      }}
+                      onMouseEnter={(e) => e.target.style.background = "rgba(255,255,255,.05)"}
+                      onMouseLeave={(e) => e.target.style.background = "transparent"}
+                    >
+                      {col}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          
+          {/* Validation Error */}
+          {!validation.valid && (
+            <div style={{ color: "#f87171", fontSize: 13, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8, marginTop: 8 }} role="alert">
+              ⚠ {validation.error}
+            </div>
+          )}
+          
+          {/* Clear All Button */}
+          {selectedCols.length > 0 && (
+            <button onClick={() => setSelectedCols([])} style={{ marginTop: 8, fontSize: 12, color: "#71717a", background: "transparent", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>
+              Clear All
+            </button>
+          )}
+        </div>
+        <button onClick={build} disabled={loading || !xCol || !validation.valid} style={S.btn}>
           {loading ? "Building…" : "📊 Build Chart"}
         </button>
       </div>
       {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>{error}</div>}
+      
+      {/* Multi-Column Hints */}
+      {selectedCols.length === 2 && (
+        <div style={{ fontSize: 12, color: "#10b981", marginBottom: 12, padding: "6px 12px", background: "rgba(16,185,129,.05)", borderRadius: 8 }}>
+          💡 Recommended for: Scatter, Bubble, Hexbin charts
+        </div>
+      )}
+      {selectedCols.length === 3 && (
+        <div style={{ fontSize: 12, color: "#10b981", marginBottom: 12, padding: "6px 12px", background: "rgba(16,185,129,.05)", borderRadius: 8 }}>
+          💡 Recommended for: 3D Scatter, Bubble (with size), Surface charts
+        </div>
+      )}
+      {selectedCols.length >= 4 && (
+        <div style={{ fontSize: 12, color: "#10b981", marginBottom: 12, padding: "6px 12px", background: "rgba(16,185,129,.05)", borderRadius: 8 }}>
+          💡 Recommended for: Parallel Coordinates, Correlogram, Heatmap
+        </div>
+      )}
       
       {/* Contextual Hints */}
       {chartType === "Pie" && (
