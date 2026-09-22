@@ -567,6 +567,35 @@ function ChartsTab() {
 }
 
 export default function Charts() {
+  // Dataset state
+  const [datasets, setDatasets] = useState([]);
+  const [activeDataset, setActiveDataset] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Fetch datasets on mount
+  useEffect(() => {
+    api.get("/data/datasets")
+      .then(r => {
+        setDatasets(r.data?.datasets || []);
+        setActiveDataset(r.data?.active || "");
+      })
+      .catch(err => console.error("Failed to load datasets:", err));
+  }, []);
+
+  // Handle dataset switch
+  const handleDatasetSwitch = async (newDataset) => {
+    if (newDataset === activeDataset || loading) return;
+    setLoading(true);
+    try {
+      await api.post(`/data/datasets/switch?name=${encodeURIComponent(newDataset)}`);
+      window.location.reload();
+    } catch (err) {
+      console.error("Failed to switch dataset:", err);
+      alert("Failed to switch dataset: " + (err.response?.data?.detail || err.message));
+      setLoading(false);
+    }
+  };
+
   return (
     <Safe>
       <div style={S.page}>
@@ -575,6 +604,21 @@ export default function Charts() {
             <div style={S.title}>📊 Charts</div>
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
+          {datasets.length > 1 && (
+            <div style={{ minWidth: 200 }}>
+              <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>Dataset</div>
+              <select
+                style={S.select}
+                value={activeDataset}
+                onChange={(e) => handleDatasetSwitch(e.target.value)}
+                disabled={loading}
+              >
+                {datasets.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <Safe>
           <ChartsTab />
