@@ -294,6 +294,9 @@ function ChartsTab() {
           <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
             Additional Columns
           </div>
+          <div style={{ fontSize: 11, color: "#52525b", marginBottom: 6, fontStyle: "italic" }}>
+            💡 Use this feature when you want to analyze multiple attributes (columns) together
+          </div>
           {/* Multi-column selector */}
           <div
             style={{
