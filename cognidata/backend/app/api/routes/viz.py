@@ -1,4 +1,4 @@
-﻿import sys, pathlib
+import sys, pathlib
 import pandas as pd
 from fastapi import APIRouter, Depends
 from app.core.deps import get_current_user
@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 router = APIRouter(prefix="/viz", tags=["Visualization"])
 
-# Bootstrap once at module load time - not on every request
+# Bootstrap once at module load time — not on every request
 _services_path = str(pathlib.Path(__file__).resolve().parents[3] / "services")
 if _services_path not in sys.path:
     sys.path.insert(0, _services_path)
@@ -20,7 +20,7 @@ def overview(max_charts: int = 6, palette: str = "Indigo",
              user: dict = Depends(get_current_user)):
     _bootstrap()
     from agents.viz_agent import auto_overview
-    df = get_df(user["email"])
+    df = get_df(user["sub"])
     if df is None: raise HTTPException(404, "No dataset found. Upload a file first.")
     charts = auto_overview(df, palette=palette, max_charts=min(max_charts, 12))
     return {"charts": charts, "total": len(charts)}
@@ -29,7 +29,7 @@ def overview(max_charts: int = 6, palette: str = "Indigo",
 def kpis(palette: str = "Indigo", user: dict = Depends(get_current_user)):
     _bootstrap()
     from agents.viz_agent import kpi_charts
-    df = get_df(user["email"])
+    df = get_df(user["sub"])
     if df is None: raise HTTPException(404, "No dataset found. Upload a file first.")
     return kpi_charts(df, palette=palette)
 
@@ -49,7 +49,6 @@ class ChartRequest(BaseModel):
     x_col: str = ""   # alias sent by frontend
     y: str = ""
     y_col: str = ""   # alias sent by frontend
-    columns: Optional[list] = None  # For multi-column charts
     color: Optional[str] = None
     size: Optional[str] = None
     title: str = "Chart"
@@ -59,7 +58,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
     """Build a custom chart from column selections."""
     import plotly.express as px
     import json, hashlib
-    df = get_df(user["email"])
+    df = get_df(user["sub"])
     if df is None:
         raise HTTPException(404, "No dataset found")
 
@@ -67,9 +66,9 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
     x = req.x or req.x_col
     y = req.y or req.y_col
 
-    # - Result cache: same user + same params + same dataset shape - return cached -
+    # ── Result cache: same user + same params + same dataset shape → return cached ──
     cache_key = hashlib.md5(
-        f"{user['email']}:{req.chart_type}:{x}:{y}:{req.color}:{req.size}:{len(df)}:{list(df.columns)}".encode()
+        f"{user['sub']}:{req.chart_type}:{x}:{y}:{req.color}:{req.size}:{len(df)}:{list(df.columns)}".encode()
     ).hexdigest()
     from app.services.data_store import get_ai_cache
     _cache = get_ai_cache()
@@ -77,79 +76,13 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
     if cached:
         return cached
 
-    # - Sample large datasets for faster rendering -
+    # ── Sample large datasets for faster rendering ────────────────────────────
     MAX_ROWS = 5000
     if len(df) > MAX_ROWS:
         df = df.sample(n=MAX_ROWS, random_state=42).reset_index(drop=True)
 
     try:
         ct = req.chart_type.lower()
-        # === MULTI-COLUMN MODE ===
-        # If columns array is provided with 2+ columns, create a multi-column visualization
-        if req.columns and len(req.columns) >= 2:
-            import plotly.graph_objects as go
-            import numpy as np
-            
-            # Validate all columns exist
-            invalid_cols = [c for c in req.columns if c not in df.columns]
-            if invalid_cols:
-                raise HTTPException(400, f"Columns not found: {invalid_cols}")
-            
-            # Filter to only requested columns
-            multi_df = df[req.columns].copy()
-            
-            # Auto-detect chart type or use parallel coordinates as default
-            if ct in ("bar", "line", "scatter"):
-                # For standard charts, use first column as x, rest as multiple y series
-                fig = go.Figure()
-                colors = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#0ea5e9"]
-                x_col = req.columns[0]
-                y_cols = req.columns[1:]
-                
-                for i, y_col in enumerate(y_cols):
-                    if ct == "bar":
-                        fig.add_trace(go.Bar(x=multi_df[x_col].head(100), y=multi_df[y_col].head(100), name=y_col, marker_color=colors[i % len(colors)]))
-                    elif ct == "line":
-                        fig.add_trace(go.Scatter(x=multi_df[x_col].head(500), y=multi_df[y_col].head(500), mode="lines", name=y_col, line=dict(color=colors[i % len(colors)], width=2)))
-                    elif ct == "scatter":
-                        fig.add_trace(go.Scatter(x=multi_df[x_col].head(500), y=multi_df[y_col].head(500), mode="markers", name=y_col, marker=dict(color=colors[i % len(colors)], size=6)))
-                
-                fig.update_layout(title=req.title + " - Multi-Column " + ct.capitalize(), template="plotly_dark", xaxis_title=x_col, yaxis_title="Value", hovermode="x unified")
-                
-            else:
-                # For all other chart types, use Parallel Coordinates
-                dims = []
-                numeric_cols = []
-                for col in req.columns:
-                    col_data = multi_df[col].dropna()
-                    if pd.api.types.is_numeric_dtype(col_data) and len(col_data) > 0:
-                        dims.append(dict(range=[float(col_data.min()), float(col_data.max())], label=col, values=col_data.head(1000).tolist()))
-                        numeric_cols.append(col)
-                    else:
-                        cats = col_data.astype(str).astype('category')
-                        if len(cats.cat.categories) > 0:
-                            dims.append(dict(range=[0, len(cats.cat.categories)], label=col, values=cats.cat.codes.head(1000).tolist(), tickvals=list(range(len(cats.cat.categories))), ticktext=cats.cat.categories.tolist()))
-                
-                # Use first numeric column for coloring
-                if numeric_cols:
-                    color_col = numeric_cols[0]
-                    color_data = multi_df[color_col].head(1000).tolist()
-                else:
-                    color_col = 'Index'
-                    color_data = list(range(len(multi_df.head(1000))))
-                
-                fig = go.Figure(go.Parcoords(
-                    line=dict(color=color_data, colorscale='Plasma', showscale=True, colorbar=dict(title=color_col, thickness=15)),
-                    dimensions=dims
-                ))
-                fig.update_layout(title=req.title + ' - Multi-Column Analysis', template='plotly_dark')
-            
-            result = {"plotly_json": json.loads(fig.to_json())}
-            _cache[f"chart:{cache_key}"] = result
-            return result
-
-
-
         kwargs = dict(title=req.title, template="plotly_dark")
         if req.color and req.color in df.columns:
             kwargs["color"] = req.color
@@ -211,7 +144,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             import numpy as np
             size_col = req.size or y
             if size_col and size_col in df.columns and pd.api.types.is_numeric_dtype(df[size_col]):
-                # Plotly requires size >= 0 - shift negative values up
+                # Plotly requires size >= 0 — shift negative values up
                 size_vals = df[size_col].fillna(0)
                 mn = size_vals.min()
                 if mn < 0:
@@ -268,13 +201,13 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             def sparkline(series):
                 mn, mx = series.min(), series.max()
                 rng = mx - mn or 1
-                bars = "-"
+                bars = "▁▂▃▄▅▆▇█"
                 return "".join(bars[int((v - mn) / rng * 7)] for v in series.dropna().head(10))
             header_vals = list(display_cols)
             cell_vals = []
             for col in display_cols:
                 if pd.api.types.is_numeric_dtype(df[col]):
-                    cell_vals.append([f"{v:.2f}" if pd.notna(v) else "-" for v in sample[col]])
+                    cell_vals.append([f"{v:.2f}" if pd.notna(v) else "—" for v in sample[col]])
                 else:
                     cell_vals.append([str(v)[:20] for v in sample[col]])
             # Add sparkline row for numeric cols
@@ -311,7 +244,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             else:
                 fig = px.area(df, x=x, y=y, **kwargs)
 
-        # - 2026 Trending Chart Types -
+        # ── 2026 Trending Chart Types ─────────────────────────────────────────
         elif ct in ("sankey", "alluvial", "flow"):
             # Alluvial / Sankey Flow Diagram
             import plotly.graph_objects as go
@@ -343,7 +276,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                 fig = px.bar(df, x=x, y=y, **kwargs)
 
         elif ct in ("beeswarm", "bee swarm", "strip"):
-            # Beeswarm / Strip Plot - individual data points without overlap
+            # Beeswarm / Strip Plot — individual data points without overlap
             import plotly.graph_objects as go
             import numpy as np
             num_col = y if y and y in df.columns else x
@@ -364,7 +297,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                                   yaxis_title=num_col)
 
         elif ct in ("bullet", "bullet chart", "kpi bullet"):
-            # Bullet Chart - actual vs target vs performance range
+            # Bullet Chart — actual vs target vs performance range
             import plotly.graph_objects as go
             import numpy as np
             num_cols = df.select_dtypes(include=np.number).columns.tolist()[:6]
@@ -483,7 +416,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             )
 
         elif ct in ("network", "network graph", "graph", "force graph"):
-            # Network Graph - relationship visualization using scatter + lines
+            # Network Graph — relationship visualization using scatter + lines
             import plotly.graph_objects as go
             import numpy as np
             cat_cols = df.select_dtypes(include="object").columns.tolist()
@@ -558,7 +491,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
 
         elif ct in ("gantt", "gantt chart", "timeline", "project timeline"):
-            # Gantt Chart - project/task timeline
+            # Gantt Chart — project/task timeline
             import plotly.graph_objects as go
             import numpy as np
             # Try to find task, start, end columns by name heuristics
@@ -601,9 +534,9 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                     yaxis=dict(autorange="reversed"),
                 )
 
-        # - Ultra-Advanced / AI-Era Chart Types -
+        # ── Ultra-Advanced / AI-Era Chart Types ──────────────────────────────
         elif ct in ("parallel coordinates", "parallel coords", "parallel"):
-            # Parallel Coordinates - high-dimensional data, each line = one record
+            # Parallel Coordinates — high-dimensional data, each line = one record
             import numpy as np
             num_cols = df.select_dtypes(include=np.number).columns.tolist()[:12]
             if not num_cols:
@@ -648,7 +581,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             else:
                 fig = px.bar(df, x=x, y=y, **kwargs)
 
-        # - Advanced / AI-Era Chart Types -
+        # ── Advanced / AI-Era Chart Types ─────────────────────────────────────
         elif ct in ("parallel coordinates", "parallel coords", "parallel"):
             import numpy as np, plotly.graph_objects as go
             num_cols = df.select_dtypes(include=np.number).columns.tolist()[:12]
@@ -902,7 +835,7 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
                     x=imp[idx], y=[features[i] for i in idx], orientation="h",
                     marker=dict(color=imp[idx], colorscale="Plasma"),
                 ))
-                fig.update_layout(title=f"{req.title} - Feature Importance",
+                fig.update_layout(title=f"{req.title} — Feature Importance",
                                   template="plotly_dark",
                                   xaxis_title="Importance", yaxis_title="Feature")
             else:
@@ -960,5 +893,3 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
         return result
     except Exception as e:
         raise HTTPException(422, f"Chart error: {e}")
-
-
