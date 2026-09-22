@@ -119,17 +119,30 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
             else:
                 # For all other chart types, use Parallel Coordinates
                 dims = []
+                numeric_cols = []
                 for col in req.columns:
                     col_data = multi_df[col].dropna()
-                    if pd.api.types.is_numeric_dtype(col_data):
+                    if pd.api.types.is_numeric_dtype(col_data) and len(col_data) > 0:
                         dims.append(dict(range=[float(col_data.min()), float(col_data.max())], label=col, values=col_data.head(1000).tolist()))
+                        numeric_cols.append(col)
                     else:
-                        cats = col_data.astype("category")
-                        dims.append(dict(range=[0, len(cats.cat.categories)], label=col, values=cats.cat.codes.head(1000).tolist(), tickvals=list(range(len(cats.cat.categories))), ticktext=cats.cat.categories.tolist()))
+                        cats = col_data.astype(str).astype('category')
+                        if len(cats.cat.categories) > 0:
+                            dims.append(dict(range=[0, len(cats.cat.categories)], label=col, values=cats.cat.codes.head(1000).tolist(), tickvals=list(range(len(cats.cat.categories))), ticktext=cats.cat.categories.tolist()))
                 
-                color_col = next((c for c in req.columns if pd.api.types.is_numeric_dtype(multi_df[c])), req.columns[0])
-                fig = go.Figure(go.Parcoords(line=dict(color=multi_df[color_col].head(1000), colorscale="Plasma", showscale=True, colorbar=dict(title=color_col, thickness=15)), dimensions=dims))
-                fig.update_layout(title=req.title + " - Multi-Column Analysis", template="plotly_dark")
+                # Use first numeric column for coloring
+                if numeric_cols:
+                    color_col = numeric_cols[0]
+                    color_data = multi_df[color_col].head(1000).tolist()
+                else:
+                    color_col = 'Index'
+                    color_data = list(range(len(multi_df.head(1000))))
+                
+                fig = go.Figure(go.Parcoords(
+                    line=dict(color=color_data, colorscale='Plasma', showscale=True, colorbar=dict(title=color_col, thickness=15)),
+                    dimensions=dims
+                ))
+                fig.update_layout(title=req.title + ' - Multi-Column Analysis', template='plotly_dark')
             
             result = {"plotly_json": json.loads(fig.to_json())}
             _cache[f"chart:{cache_key}"] = result
