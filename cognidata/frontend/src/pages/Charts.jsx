@@ -65,7 +65,9 @@ const S = {
   btn:        { padding: "8px 16px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   empty:      { textAlign: "center", padding: "60px 20px", color: "#52525b", fontSize: 14 },
   chartCard:  { background: "#18181b", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, overflow: "hidden" },
-  multiCol:   { background: "#18181b", border: "1px solid rgba(99,102,241,.2)", borderRadius: 8, padding: 10, marginTop: 8 },
+  multiSelect:{ position: "relative", minHeight: 38 },
+  dropdown:   { position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: "#18181b", border: "1px solid rgba(99,102,241,.3)", borderRadius: 8, maxHeight: 200, overflowY: "auto", zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.3)" },
+  dropItem:   { padding: "8px 12px", fontSize: 13, color: "#e4e4e7", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 },
   colPill:    { display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(99,102,241,.15)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 6, padding: "4px 8px", margin: "2px 4px 2px 0", fontSize: 12, color: "#a5b4fc" },
 };
 
@@ -80,6 +82,7 @@ function ChartsTab() {
   const [explanation, setExplanation] = useState("");
   const [explainLoading, setExplainLoading] = useState(false);
   const [selectedCols, setSelectedCols] = useState([]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   useEffect(() => {
     api.get("/data/info").then(({ data }) => {
@@ -130,7 +133,8 @@ function ChartsTab() {
         // Multi-column mode
         requestBody = {
           chart_type: effectiveType,
-          columns: selectedCols
+          columns: selectedCols,
+          title: `${chartType} - Multi-Column`
         };
       } else {
         // Single-column mode
@@ -139,6 +143,7 @@ function ChartsTab() {
           chart_type: effectiveType,
           x_col: xCol,
           y_col: effectiveY,
+          title: chartType
         };
       }
 
@@ -224,23 +229,52 @@ function ChartsTab() {
         </button>
       </div>
 
-      {/* Multi-Column Selector */}
-      <div style={S.multiCol}>
+      {/* Multi-Column Dropdown Selector */}
+      <div style={S.card}>
         <div style={{ fontSize: 11, color: "#71717a", marginBottom: 6 }}>
           🎯 Multi-Column Analysis <span style={{ fontSize: 10, color: "#52525b", marginLeft: 6 }}>(Select 2+ columns for multi-series charts)</span>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {cols.map(col => (
-            <label key={col} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={selectedCols.includes(col)}
-                onChange={() => toggleColumn(col)}
-                style={{ cursor: "pointer" }}
-              />
-              <span style={{ fontSize: 12, color: "#a1a1aa" }}>{col}</span>
-            </label>
-          ))}
+        <div style={S.multiSelect}>
+          <div
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            style={{
+              ...S.select,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              minHeight: 38
+            }}
+          >
+            <span style={{ fontSize: 13, color: selectedCols.length ? "#e4e4e7" : "#71717a" }}>
+              {selectedCols.length > 0 ? `${selectedCols.length} column${selectedCols.length > 1 ? 's' : ''} selected` : "Select columns..."}
+            </span>
+            <span style={{ fontSize: 12 }}>{dropdownOpen ? "▲" : "▼"}</span>
+          </div>
+          {dropdownOpen && (
+            <div style={S.dropdown}>
+              {cols.map(col => (
+                <div
+                  key={col}
+                  onClick={() => toggleColumn(col)}
+                  style={{
+                    ...S.dropItem,
+                    background: selectedCols.includes(col) ? "rgba(99,102,241,.15)" : "transparent"
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = selectedCols.includes(col) ? "rgba(99,102,241,.2)" : "rgba(255,255,255,.05)"}
+                  onMouseLeave={e => e.currentTarget.style.background = selectedCols.includes(col) ? "rgba(99,102,241,.15)" : "transparent"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedCols.includes(col)}
+                    onChange={() => {}}
+                    style={{ cursor: "pointer" }}
+                  />
+                  <span>{col}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {selectedCols.length > 0 && (
           <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,.05)" }}>
