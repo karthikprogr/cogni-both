@@ -78,6 +78,8 @@ function ChartsTab() {
   const [chart, setChart]    = useState(null);
   const [loading, setLoad]   = useState(false);
   const [error, setError]    = useState("");
+  const [explanation, setExplanation] = useState("");
+  const [explainLoading, setExplainLoading] = useState(false);
   
   // Multi-column selector state
   const [selectedCols, setSelectedCols] = useState([]);
@@ -231,6 +233,25 @@ function ChartsTab() {
       setError(detail);
     }
     setLoad(false);
+  };
+
+  const handleExplain = async () => {
+    if (!chart) return;
+    setExplainLoading(true);
+    setExplanation("");
+    try {
+      const chartInfo = {
+        chart_type: chartType,
+        x_column: xCol,
+        y_column: yCol,
+        selected_columns: selectedCols.length > 0 ? selectedCols : null,
+      };
+      const { data } = await api.post("/ai/explain-chart", chartInfo);
+      setExplanation(data.explanation || data.message || "Chart explanation generated.");
+    } catch (e) {
+      setExplanation("Unable to generate explanation: " + (e.response?.data?.detail || e.message));
+    }
+    setExplainLoading(false);
   };
 
   const cols = info?.columns_info?.map(c => c.name) || [];
@@ -560,6 +581,57 @@ function ChartsTab() {
       {chart && (
         <div style={S.chartCard}>
           <Safe><Chart figure={chart} height={420} /></Safe>
+        </div>
+      )}
+      
+      {/* Explain Button */}
+      {chart && (
+        <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
+          <button 
+            onClick={handleExplain} 
+            disabled={explainLoading}
+            style={{
+              ...S.btn,
+              background: explainLoading ? "#52525b" : "linear-gradient(135deg, #10b981, #059669)",
+              cursor: explainLoading ? "not-allowed" : "pointer",
+              opacity: explainLoading ? 0.6 : 1,
+            }}
+          >
+            {explainLoading ? "⏳ Generating..." : "💡 Explain Chart"}
+          </button>
+          {explanation && (
+            <button 
+              onClick={() => setExplanation("")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "none",
+                background: "transparent",
+                color: "#71717a",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              ✕ Clear
+            </button>
+          )}
+        </div>
+      )}
+      
+      {/* Explanation Display */}
+      {explanation && (
+        <div style={{
+          ...S.card,
+          marginTop: 12,
+          background: "linear-gradient(135deg, rgba(16,185,129,.05), rgba(5,150,105,.05))",
+          border: "1px solid rgba(16,185,129,.2)",
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#10b981", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+            💡 Chart Explanation
+          </div>
+          <div style={{ fontSize: 13, color: "#e4e4e7", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+            {explanation}
+          </div>
         </div>
       )}
     </div>

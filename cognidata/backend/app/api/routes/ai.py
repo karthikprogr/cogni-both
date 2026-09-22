@@ -125,3 +125,37 @@ async def vision_query(
         return {"answer": resp.choices[0].message.content, "task_type": "vision", "type": "text", "status": "success"}
     except Exception as e:
         return {"answer": f"Vision analysis failed: {e}", "task_type": "vision", "type": "error", "status": "error"}
+
+class ExplainChartRequest(BaseModel):
+    chart_type: str
+    x_column: Optional[str] = None
+    y_column: Optional[str] = None
+    selected_columns: Optional[list] = None
+
+@router.post('/explain-chart')
+async def explain_chart(req: ExplainChartRequest, api_key: str = Depends(get_api_key), user: dict = Depends(get_current_user)):
+    from app.services.data_store import get as get_df
+    import os, pandas as pd, openai
+    
+    df = get_df(user['email'])
+    if df is None:
+        return {'explanation': 'No dataset available to analyze.'}
+    
+    chart_info = f'Chart: {req.chart_type}\n'
+    if req.selected_columns:
+        chart_info += f'Columns: {", ".join(req.selected_columns)}\n'
+    else:
+        if req.x_column: chart_info += f'X: {req.x_column}\n'
+        if req.y_column: chart_info += f'Y: {req.y_column}\n'
+    chart_info += f'Rows: {len(df)}\n'
+    
+    try:
+        openai_key = api_key or os.getenv('OPENAI_API_KEY')
+        if not openai_key:
+            return {'explanation': 'OpenAI API key not configured.'}
+        client = openai.OpenAI(api_key=openai_key)
+        prompt = f'Explain this chart in 3 sentences: {chart_info}'
+        response = client.chat.completions.create(model='gpt-3.5-turbo', messages=[{'role': 'user', 'content': prompt}], max_tokens=150)
+        return {'explanation': response.choices[0].message.content.strip()}
+    except Exception as e:
+        return {'explanation': f'Error: {str(e)}'}
