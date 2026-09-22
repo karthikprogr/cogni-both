@@ -604,7 +604,7 @@ export default function Charts() {
             <div style={S.title}>📊 Charts</div>
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
-          {datasets.length > 1 && (
+          {datasets.length > 0 && (
             <div style={{ minWidth: 200 }}>
               <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>Dataset</div>
               <select
@@ -627,3 +627,4 @@ export default function Charts() {
     </Safe>
   );
 }
+

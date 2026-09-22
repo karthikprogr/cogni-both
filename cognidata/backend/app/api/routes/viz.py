@@ -49,6 +49,7 @@ class ChartRequest(BaseModel):
     x_col: str = ""   # alias sent by frontend
     y: str = ""
     y_col: str = ""   # alias sent by frontend
+    columns: Optional[list] = None  # For multi-column charts
     color: Optional[str] = None
     size: Optional[str] = None
     title: str = "Chart"
@@ -82,7 +83,60 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
         df = df.sample(n=MAX_ROWS, random_state=42).reset_index(drop=True)
 
     try:
-        ct = req.chart_type.lower()
+        # === MULTI-COLUMN MODE ===
+        # If columns array is provided with 2+ columns, create a multi-column visualization
+        if req.columns and len(req.columns) >= 2:
+            import plotly.graph_objects as go
+            import numpy as np
+            
+            # Validate all columns exist
+            invalid_cols = [c for c in req.columns if c not in df.columns]
+            if invalid_cols:
+                raise HTTPException(400, f"Columns not found: {invalid_cols}")
+            
+            # Filter to only requested columns
+            multi_df = df[req.columns].copy()
+            
+            # Auto-detect chart type or use parallel coordinates as default
+            ct = req.chart_type.lower()
+            if ct in ("bar", "line", "scatter"):
+                # For standard charts, use first column as x, rest as multiple y series
+                fig = go.Figure()
+                colors = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#0ea5e9"]
+                x_col = req.columns[0]
+                y_cols = req.columns[1:]
+                
+                for i, y_col in enumerate(y_cols):
+                    if ct == "bar":
+                        fig.add_trace(go.Bar(x=multi_df[x_col].head(100), y=multi_df[y_col].head(100), name=y_col, marker_color=colors[i % len(colors)]))
+                    elif ct == "line":
+                        fig.add_trace(go.Scatter(x=multi_df[x_col].head(500), y=multi_df[y_col].head(500), mode="lines", name=y_col, line=dict(color=colors[i % len(colors)], width=2)))
+                    elif ct == "scatter":
+                        fig.add_trace(go.Scatter(x=multi_df[x_col].head(500), y=multi_df[y_col].head(500), mode="markers", name=y_col, marker=dict(color=colors[i % len(colors)], size=6)))
+                
+                fig.update_layout(title=req.title + " - Multi-Column " + ct.capitalize(), template="plotly_dark", xaxis_title=x_col, yaxis_title="Value", hovermode="x unified")
+                
+            else:
+                # For all other chart types, use Parallel Coordinates
+                dims = []
+                for col in req.columns:
+                    col_data = multi_df[col].dropna()
+                    if pd.api.types.is_numeric_dtype(col_data):
+                        dims.append(dict(range=[float(col_data.min()), float(col_data.max())], label=col, values=col_data.head(1000).tolist()))
+                    else:
+                        cats = col_data.astype("category")
+                        dims.append(dict(range=[0, len(cats.cat.categories)], label=col, values=cats.cat.codes.head(1000).tolist(), tickvals=list(range(len(cats.cat.categories))), ticktext=cats.cat.categories.tolist()))
+                
+                color_col = next((c for c in req.columns if pd.api.types.is_numeric_dtype(multi_df[c])), req.columns[0])
+                fig = go.Figure(go.Parcoords(line=dict(color=multi_df[color_col].head(1000), colorscale="Plasma", showscale=True, colorbar=dict(title=color_col, thickness=15)), dimensions=dims))
+                fig.update_layout(title=req.title + " - Multi-Column Analysis", template="plotly_dark")
+            
+            result = {"plotly_json": fig.to_dict()}
+            _cache[f"chart:{cache_key}"] = result
+            return result
+
+
+
         kwargs = dict(title=req.title, template="plotly_dark")
         if req.color and req.color in df.columns:
             kwargs["color"] = req.color
@@ -893,3 +947,5 @@ def custom_chart(req: ChartRequest, user: dict = Depends(get_current_user)):
         return result
     except Exception as e:
         raise HTTPException(422, f"Chart error: {e}")
+
+
