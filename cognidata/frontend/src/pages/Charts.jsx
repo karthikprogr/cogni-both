@@ -613,36 +613,35 @@ export default function Charts() {
       <div style={S.page}>
         <div style={S.header}>
           <div>
-            <div style={S.title}>?? Charts</div>
+            <div style={S.title}>📊 Charts</div>
             <div style={S.sub}>Build custom visualizations with 100+ chart types</div>
           </div>
           {/* Dataset Selector */}
-          {!loadingDatasets && activeDatasetName && (
-            <div>
-              <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
-                Active Dataset: <span style={{ color: "#22c55e", fontWeight: 600 }}>{activeDatasetName}</span>
-              </div>
-              {datasetNames.length > 1 && (
-                <select 
-                  style={S.datasetSelector}
-                  value={activeDatasetName}
-                  onChange={(e) => switchDataset(e.target.value)}
-                  disabled={switchingDataset}
-                >
-                  {datasetNames.map(name => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
-        </div>
-        <Safe>
-          <ChartsTab />
-        </Safe>
-      </div>
-    </Safe>
-  );
-}
+          <div>
+            {loadingDatasets ? (
+              <div style={{ fontSize: 11, color: "#71717a" }}>Loading datasets...</div>
+            ) : activeDatasetName ? (
+              <>
+                <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>
+                  Active Dataset: <span style={{ color: "#22c55e", fontWeight: 600 }}>{activeDatasetName}</span>
+                </div>
+                {datasetNames.length > 1 && (
+                  <select
+                    style={S.datasetSelector}
+                    value={activeDatasetName}
+                    onChange={(e) => switchDataset(e.target.value)}
+                    disabled={switchingDataset}
+                  >
+                    {datasetNames.map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 11, color: "#f59e0b" }}>No dataset loaded</div>
+            )}
+          </div>
+
