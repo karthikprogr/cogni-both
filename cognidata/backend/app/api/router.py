@@ -1,10 +1,10 @@
-from fastapi import APIRouter
+﻿from fastapi import APIRouter
 from app.api.routes import (
     health, auth, data, ai, viz, admin, ws, ml,
     sql, reports, geo, rag, roadmap, profile, config,
     workspaces, debug, analytics, maps, alerts,
     federated, semantic, pipeline, catalog, isochrone,
-    actions, ingest, sdk, analyst, stream
+    actions, ingest, sdk, analyst, stream, chat_history
 )
 
 api_router = APIRouter(prefix="/api")
@@ -38,3 +38,4 @@ api_router.include_router(ingest.router)
 api_router.include_router(sdk.router)
 api_router.include_router(analyst.router)
 api_router.include_router(stream.router)
+api_router.include_router(chat_history.router)
