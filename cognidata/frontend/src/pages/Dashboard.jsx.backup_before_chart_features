@@ -1,0 +1,1313 @@
+﻿import { useEffect, useState, useCallback, useMemo, memo, startTransition } from "react";
+import { api } from "../api/client";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// API CACHE HOOK - Session-level in-memory cache for GET requests
+// ═══════════════════════════════════════════════════════════════════════════════
+const apiCache = new Map();
+
+function useApiCache(key, fetcher, dependencies = []) {
+  const [data, setData] = useState(() => apiCache.get(key) || null);
+  const [loading, setLoading] = useState(!apiCache.has(key));
+
+  const fetch = useCallback(async () => {
+    if (apiCache.has(key)) {
+      setData(apiCache.get(key));
+      setLoading(false);
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const result = await fetcher();
+      apiCache.set(key, result);
+      setData(result);
+    } catch (error) {
+      console.error(`Cache fetch error for ${key}:`, error);
+    } finally {
+      setLoading(false);
+    }
+  }, [key, fetcher]);
+
+  useEffect(() => {
+    fetch();
+  }, [fetch, ...dependencies]);
+
+  const invalidate = useCallback(() => {
+    apiCache.delete(key);
+    fetch();
+  }, [key, fetch]);
+
+  return { data, loading, invalidate };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DEBOUNCE HOOK - Delays value updates to reduce API calls
+// ═══════════════════════════════════════════════════════════════════════════════
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SKELETON LOADERS - Better perceived performance
+// ═══════════════════════════════════════════════════════════════════════════════
+function SkeletonBox({ width = "100%", height = "20px", style = {} }) {
+  return (
+    <div style={{
+      width,
+      height,
+      background: "linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.08) 50%, rgba(255,255,255,.05) 75%)",
+      backgroundSize: "200% 100%",
+      animation: "skeleton-pulse 1.5s ease-in-out infinite",
+      borderRadius: 6,
+      ...style
+    }} />
+  );
+}
+
+function SkeletonKPI() {
+  return (
+    <div style={S.kpi}>
+      <SkeletonBox height="32px" width="60%" />
+      <SkeletonBox height="14px" width="80%" style={{ marginTop: 8 }} />
+    </div>
+  );
+}
+
+function SkeletonChart({ height = 260 }) {
+  return (
+    <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.02)", borderRadius: 8 }}>
+      <SkeletonBox height="80%" width="90%" />
+    </div>
+  );
+}
+
+function SkeletonTable({ rows = 5, cols = 4 }) {
+  return (
+    <div>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{ display: "flex", gap: 12, padding: "12px 0", borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+          {Array.from({ length: cols }).map((_, j) => (
+            <SkeletonBox key={j} height="16px" width={`${100 / cols}%`} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEARCHABLE DROPDOWN - Custom dropdown with search for 150+ chart types
+// ═══════════════════════════════════════════════════════════════════════════════
+function SearchableSelect({ value, onChange, options, placeholder = "Select..." }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredOptions = useMemo(() => {
+    if (!search) return options;
+    const searchLower = search.toLowerCase();
+    return options.filter(opt => {
+      const label = typeof opt === "string" ? opt : opt.label;
+      return label.toLowerCase().includes(searchLower);
+    });
+  }, [options, search]);
+
+  const handleSelect = useCallback((val) => {
+    onChange(val);
+    setIsOpen(false);
+    setSearch("");
+  }, [onChange]);
+
+  const displayValue = useMemo(() => {
+    if (!value) return placeholder;
+    const opt = options.find(o => (typeof o === "string" ? o : o.value) === value);
+    return typeof opt === "string" ? opt : opt?.label || value;
+  }, [value, options, placeholder]);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          ...S.select,
+          cursor: "pointer",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          userSelect: "none"
+        }}
+      >
+        <span>{displayValue}</span>
+        <span style={{ fontSize: 10, marginLeft: 8 }}>{isOpen ? "▲" : "▼"}</span>
+      </div>
+
+      {isOpen && (
+        <>
+          <div
+            onClick={() => setIsOpen(false)}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 999
+            }}
+          />
+          <div style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            marginTop: 4,
+            background: "#18181b",
+            border: "1px solid rgba(255,255,255,.15)",
+            borderRadius: 8,
+            maxHeight: 400,
+            overflowY: "auto",
+            zIndex: 1000,
+            boxShadow: "0 10px 40px rgba(0,0,0,.5)"
+          }}>
+            <div style={{ padding: 8, borderBottom: "1px solid rgba(255,255,255,.08)", position: "sticky", top: 0, background: "#18181b", zIndex: 1 }}>
+              <input
+                type="text"
+                placeholder="Search chart types..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+                style={{
+                  ...S.input,
+                  fontSize: 12,
+                  padding: "6px 10px"
+                }}
+              />
+            </div>
+            <div style={{ maxHeight: 340, overflowY: "auto" }}>
+              {filteredOptions.length === 0 ? (
+                <div style={{ padding: 16, textAlign: "center", color: "#71717a", fontSize: 12 }}>
+                  No matching charts
+                </div>
+              ) : (
+                filteredOptions.map((opt, idx) => {
+                  const optValue = typeof opt === "string" ? opt : opt.value;
+                  const optLabel = typeof opt === "string" ? opt : opt.label;
+                  const isSelected = optValue === value;
+                  
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => handleSelect(optValue)}
+                      style={{
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                        fontSize: 13,
+                        color: isSelected ? "#818cf8" : "#e4e4e7",
+                        background: isSelected ? "rgba(99,102,241,.1)" : "transparent",
+                        transition: "background .15s",
+                        borderLeft: isSelected ? "3px solid #6366f1" : "3px solid transparent"
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,.05)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      {optLabel}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-SELECT COLUMN PICKER - For multi-column chart visualization
+// ═══════════════════════════════════════════════════════════════════════════════
+function MultiSelectColumnPicker({ value = [], onChange, options }) {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  const handleToggle = (col) => {
+    const newValue = value.includes(col) 
+      ? value.filter(c => c !== col)
+      : [...value, col];
+    onChange(newValue);
+  };
+  
+  const handleSelectAll = () => {
+    onChange(options);
+  };
+  
+  const handleClearAll = () => {
+    onChange([]);
+  };
+  
+  const displayText = value.length === 0 
+    ? "Select columns..."
+    : `${value.length} column${value.length > 1 ? 's' : ''} selected`;
+  
+  return (
+    <div style={{ position: "relative" }}>
+      <div onClick={() => setIsOpen(!isOpen)} style={{ ...S.select, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", userSelect: "none" }}>
+        <span>{displayText}</span>
+        <span style={{ fontSize: 10, marginLeft: 8 }}>{isOpen ? "▲" : "▼"}</span>
+      </div>
+      
+      {isOpen && (
+        <>
+          <div onClick={() => setIsOpen(false)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }} />
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: "#18181b", border: "1px solid rgba(255,255,255,.15)", borderRadius: 8, maxHeight: 300, overflowY: "auto", zIndex: 1000, boxShadow: "0 10px 40px rgba(0,0,0,.5)" }}>
+            <div style={{ padding: 8, borderBottom: "1px solid rgba(255,255,255,.08)", display: "flex", gap: 6 }}>
+              <button onClick={handleSelectAll} style={{ flex: 1, padding: "4px 8px", background: "rgba(99,102,241,.15)", border: "1px solid rgba(99,102,241,.3)", borderRadius: 4, color: "#818cf8", fontSize: 10, cursor: "pointer" }}>
+                Select All
+              </button>
+              <button onClick={handleClearAll} style={{ flex: 1, padding: "4px 8px", background: "rgba(239,68,68,.15)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 4, color: "#f87171", fontSize: 10, cursor: "pointer" }}>
+                Clear All
+              </button>
+            </div>
+            {options.map((col, idx) => {
+              const isChecked = value.includes(col);
+              return (
+                <div key={idx} onClick={() => handleToggle(col)} style={{ padding: "10px 12px", cursor: "pointer", fontSize: 13, color: "#e4e4e7", display: "flex", alignItems: "center", gap: 8, background: isChecked ? "rgba(99,102,241,.08)" : "transparent", transition: "background .15s" }}
+                  onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = "rgba(255,255,255,.05)"; }}
+                  onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}>
+                  <div style={{ width: 14, height: 14, border: `2px solid ${isChecked ? "#6366f1" : "rgba(255,255,255,.3)"}`, borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", background: isChecked ? "#6366f1" : "transparent" }}>
+                    {isChecked && <span style={{ color: "#fff", fontSize: 10 }}>✓</span>}
+                  </div>
+                  <span>{col}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ERROR BOUNDARY - Prevents crashes from blanking the page
+// ═══════════════════════════════════════════════════════════════════════════════
+import { Component } from "react";
+class Safe extends Component {
+  state = { err: null };
+  static getDerivedStateFromError(e) { return { err: e }; }
+  render() {
+    if (this.state.err) return (
+      <div style={{ padding: 12, color: "#f87171", fontSize: 12, background: "rgba(239,68,68,.05)", borderRadius: 8 }}>
+        ⚠ {this.state.err.message}
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INLINE MINI BAR CHART - Zero dependencies
+// ═══════════════════════════════════════════════════════════════════════════════
+const MiniBar = memo(function MiniBar({ data, color = "#6366f1", height = 60 }) {
+  const max = useMemo(() => Math.max(...(data?.map(d => d.value || 0) || [0]), 1), [data]);
+  
+  if (!data?.length) return null;
+  
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height, padding: "4px 8px" }}>
+      {data.slice(0, 20).map((d, i) => (
+        <div key={i} title={`${d.label}: ${d.value}`} style={{
+          flex: 1, background: color, borderRadius: "2px 2px 0 0",
+          height: `${Math.max(4, (d.value / max) * 100)}%`,
+          opacity: 0.8, minWidth: 4,
+        }} />
+      ))}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLOTLY CHART - Loaded dynamically with memoization
+// ═══════════════════════════════════════════════════════════════════════════════
+const Chart = memo(function Chart({ figure, height = 260 }) {
+  const [Plot, setPlot] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    import("react-plotly.js").then(m => {
+      if (!cancelled) setPlot(() => m.default);
+    }).catch(e => {
+      if (!cancelled) setErr(e.message);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const plotLayout = useMemo(() => ({
+    ...figure?.layout,
+    paper_bgcolor: "transparent",
+    plot_bgcolor: "transparent",
+    font: { color: "#a1a1aa", family: "Inter,sans-serif", size: 11 },
+    margin: { l: 40, r: 16, t: 30, b: 40 },
+    height,
+  }), [figure?.layout, height]);
+
+  if (!figure) return null;
+  if (err) return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "#52525b", fontSize: 12 }}>Chart unavailable</div>;
+  if (!Plot) return <SkeletonChart height={height} />;
+
+  return (
+    <Safe>
+      <Plot
+        data={figure.data || []}
+        layout={plotLayout}
+        config={{ displayModeBar: false, responsive: true }}
+        style={{ width: "100%" }}
+        useResizeHandler
+      />
+    </Safe>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STYLES
+// ═══════════════════════════════════════════════════════════════════════════════
+const S = {
+  page:      { padding: "20px 24px", background: "#09090b", minHeight: "100vh", color: "#e4e4e7", overflowY: "auto" },
+  header:    { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
+  title:     { fontSize: 20, fontWeight: 700, color: "#fff" },
+  sub:       { fontSize: 12, color: "#71717a", marginTop: 2 },
+  tabs:      { display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid rgba(255,255,255,.06)" },
+  tab:       (a) => ({ padding: "8px 16px", background: "transparent", border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", borderBottom: a ? "2px solid #6366f1" : "2px solid transparent", color: a ? "#818cf8" : "#71717a", transition: "all .2s" }),
+  card:      { background: "#18181b", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, padding: 16, marginBottom: 14 },
+  kpiGrid:   { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12, marginBottom: 20 },
+  kpi:       { background: "#18181b", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, padding: "16px 18px" },
+  kpiVal:    { fontSize: 26, fontWeight: 700, color: "#818cf8" },
+  kpiLbl:    { fontSize: 11, color: "#71717a", marginTop: 4 },
+  grid2:     { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 },
+  chartCard: { background: "#18181b", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, overflow: "hidden" },
+  chartTitle:{ fontSize: 12, fontWeight: 600, color: "#a1a1aa", padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,.05)" },
+  input:     { background: "#09090b", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "8px 12px", color: "#e4e4e7", fontSize: 13, width: "100%", boxSizing: "border-box" },
+  select:    { background: "#09090b", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "8px 12px", color: "#e4e4e7", fontSize: 13, width: "100%" },
+  btn:       { padding: "8px 16px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "opacity .2s" },
+  empty:     { textAlign: "center", padding: "60px 20px", color: "#52525b", fontSize: 14 },
+  table:     { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  th:        { padding: "8px 12px", textAlign: "left", color: "#71717a", borderBottom: "1px solid rgba(255,255,255,.06)", fontWeight: 600, fontSize: 11 },
+  td:        { padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,.04)", color: "#e4e4e7" },
+};
+
+// Add skeleton animation to document
+if (typeof document !== "undefined" && !document.getElementById("skeleton-animation")) {
+  const style = document.createElement("style");
+  style.id = "skeleton-animation";
+  style.textContent = `
+    @keyframes skeleton-pulse {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OVERVIEW TAB - Memoized with cached API calls
+// ═══════════════════════════════════════════════════════════════════════════════
+const OverviewTab = memo(function OverviewTab() {
+  const [palette, setPalette] = useState("Indigo");
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [charts, setCharts] = useState([]);
+
+  const PALETTES = useMemo(() => ["Indigo", "Emerald", "Sunset", "Ocean"], []);
+
+  // Cache data/info with automatic caching
+  const { data: info, loading: infoLoading } = useApiCache(
+    "data-info",
+    useCallback(async () => {
+      const res = await api.get("/data/info");
+      const d = res.data;
+      if (d && typeof d.rows === "number") return d;
+      return null;
+    }, []),
+    []
+  );
+
+  // Load charts with palette dependency
+  const loadCharts = useCallback(async (pal) => {
+    setChartsLoading(true);
+    try {
+      const res = await api.get(`/viz/overview?max_charts=4&palette=${pal}`);
+      setCharts(res.data?.charts || []);
+    } catch (error) {
+      console.error("Charts load error:", error);
+      setCharts([]);
+    } finally {
+      setChartsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCharts(palette);
+  }, [palette, loadCharts]);
+
+  const handlePaletteChange = useCallback((p) => {
+    setPalette(p);
+  }, []);
+
+  // Memoize KPI calculations
+  const kpiData = useMemo(() => {
+    if (!info) return null;
+    
+    const missingRaw = info.missing_values;
+    const missing = typeof missingRaw === "number"
+      ? missingRaw
+      : (missingRaw && typeof missingRaw === "object")
+        ? Object.values(missingRaw).reduce((a, b) => a + (Number(b) || 0), 0)
+        : 0;
+
+    return [
+      ["Rows", info.rows?.toLocaleString(), "#6366f1"],
+      ["Columns", info.columns, "#10b981"],
+      ["Numeric", Array.isArray(info.numeric_columns) ? info.numeric_columns.length : (info.numeric_columns || 0), "#f59e0b"],
+      ["Categorical", Array.isArray(info.categorical_columns) ? info.categorical_columns.length : (info.categorical_columns || 0), "#0ea5e9"],
+      ["Missing", missing, missing > 0 ? "#ef4444" : "#22c55e"],
+    ];
+  }, [info]);
+
+  if (!info && !infoLoading) return (
+    <div style={S.empty}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>📤</div>
+      <div style={{ fontWeight: 600, color: "#a1a1aa" }}>No dataset loaded</div>
+      <div style={{ fontSize: 12, marginTop: 6 }}>Upload a CSV, Excel, or JSON file to see your dashboard</div>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Palette Selector */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#71717a" }}>Palette:</span>
+        {PALETTES.map(p => (
+          <button key={p} onClick={() => handlePaletteChange(p)}
+            style={{ padding: "4px 12px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer",
+              background: palette === p ? "rgba(99,102,241,.2)" : "transparent",
+              borderColor: palette === p ? "rgba(99,102,241,.5)" : "rgba(255,255,255,.1)",
+              color: palette === p ? "#818cf8" : "#71717a",
+              transition: "all .2s" }}>
+            {p}
+          </button>
+        ))}
+        {chartsLoading && <span style={{ fontSize: 11, color: "#52525b" }}>Loading…</span>}
+      </div>
+
+      {/* KPI Cards */}
+      {infoLoading ? (
+        <div style={S.kpiGrid}>
+          {Array.from({ length: 5 }).map((_, i) => <SkeletonKPI key={i} />)}
+        </div>
+      ) : kpiData && (
+        <div style={S.kpiGrid}>
+          {kpiData.map(([label, val, color]) => (
+            <div key={label} style={S.kpi}>
+              <div style={{ ...S.kpiVal, color }}>{typeof val === "object" ? "—" : (val ?? "—")}</div>
+              <div style={S.kpiLbl}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Charts Grid */}
+      {chartsLoading ? (
+        <div style={S.grid2}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} style={S.chartCard}>
+              <div style={S.chartTitle}>Loading...</div>
+              <SkeletonChart height={260} />
+            </div>
+          ))}
+        </div>
+      ) : charts.length > 0 ? (
+        <div style={S.grid2}>
+          {charts.map((c, i) => (
+            <div key={i} style={S.chartCard}>
+              <div style={S.chartTitle}>{c.title}</div>
+              <Safe>
+                <Chart figure={c.plotly_json} height={260} />
+              </Safe>
+            </div>
+          ))}
+        </div>
+      ) : !infoLoading && info && (
+        <div style={{ ...S.card, textAlign: "center", color: "#52525b", padding: 30 }}>
+          Charts are loading… if they don't appear, check your API key in Settings.
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA EXPLORER TAB - Memoized with cached data and optimized pagination
+// ═══════════════════════════════════════════════════════════════════════════════
+const ExplorerTab = memo(function ExplorerTab() {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
+
+  // Cached preview data
+  const { data: preview, loading: previewLoading } = useApiCache(
+    "data-preview",
+    useCallback(async () => {
+      const res = await api.get("/data/preview?n=500");
+      return res.data;
+    }, []),
+    []
+  );
+
+  // Cached stats data
+  const { data: stats } = useApiCache(
+    "data-stats",
+    useCallback(async () => {
+      const res = await api.get("/data/stats");
+      return res.data;
+    }, []),
+    []
+  );
+
+  const handleSearchChange = useCallback((e) => {
+    setSearch(e.target.value);
+    setPage(0);
+  }, []);
+
+  const handlePrevPage = useCallback(() => {
+    setPage(p => Math.max(0, p - 1));
+  }, []);
+
+  const handleNextPage = useCallback((totalPages) => {
+    setPage(p => Math.min(totalPages - 1, p + 1));
+  }, []);
+
+  // Memoize filtered and paged data
+  const { rows, cols, filtered, paged, totalPages } = useMemo(() => {
+    if (!preview) return { rows: [], cols: [], filtered: [], paged: [], totalPages: 0 };
+    
+    const rows = preview.data || [];
+    const cols = preview.columns || [];
+    
+    // Debug logging
+    console.log("Data Explorer Debug:", { 
+      previewExists: !!preview, 
+      rowsCount: rows.length, 
+      colsCount: cols.length,
+      page: page,
+      PAGE_SIZE: PAGE_SIZE
+    });
+    
+    const filtered = search
+      ? rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(search.toLowerCase())))
+      : rows;
+    
+    const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+    
+    return { rows, cols, filtered, paged, totalPages };
+  }, [preview, search, page, PAGE_SIZE]);
+
+  if (previewLoading) {
+    return (
+      <div>
+        <div style={{ marginBottom: 12 }}>
+          <SkeletonBox height="40px" />
+        </div>
+        <div style={{ ...S.card, padding: 16 }}>
+          <SkeletonTable rows={10} cols={5} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!preview) return <div style={S.empty}>No dataset loaded</div>;
+
+  return (
+    <div>
+      {/* Stats */}
+      {stats && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          {Object.entries(stats).slice(0, 6).map(([col, s]) => (
+            <div key={col} style={{ ...S.kpi, flex: "1 1 130px" }}>
+              <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col}</div>
+              <div style={{ fontSize: 13, color: "#e4e4e7" }}>μ {typeof s.mean === "number" ? s.mean.toFixed(2) : "—"}</div>
+              <div style={{ fontSize: 11, color: "#52525b" }}>σ {typeof s.std === "number" ? s.std.toFixed(2) : "—"}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginBottom: 12 }}>
+        <input style={S.input} placeholder="Search rows…" value={search}
+          onChange={handleSearchChange} />
+      </div>
+
+      <div style={{ ...S.card, padding: 0, overflowX: "auto" }}>
+        {paged.length === 0 && <div style={{ padding: 20, textAlign: "center", color: "#71717a" }}>No data to display. Preview data: {preview ? "loaded" : "not loaded"}</div>}
+        <table style={S.table}>
+          <thead>
+            <tr>{cols.map(c => <th key={c} style={S.th}>{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {paged.map((row, i) => (
+              <tr key={i}>
+                {cols.map(c => <td key={c} style={S.td}>{String(row[c] ?? "").slice(0, 60)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,.05)", fontSize: 12, color: "#71717a" }}>
+          <span>{filtered.length} rows{search ? ` (filtered from ${rows.length})` : ""}</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handlePrevPage} disabled={page === 0}
+              style={{ ...S.btn, padding: "4px 10px", fontSize: 11, opacity: page === 0 ? 0.4 : 1, cursor: page === 0 ? "not-allowed" : "pointer" }}>← Prev</button>
+            <span style={{ padding: "4px 8px" }}>{page + 1} / {totalPages || 1}</span>
+            <button onClick={() => handleNextPage(totalPages)} disabled={page >= totalPages - 1}
+              style={{ ...S.btn, padding: "4px 10px", fontSize: 11, opacity: page >= totalPages - 1 ? 0.4 : 1, cursor: page >= totalPages - 1 ? "not-allowed" : "pointer" }}>Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHARTS TAB - Debounced chart building + searchable dropdown
+// ═══════════════════════════════════════════════════════════════════════════════
+const ChartsTab = memo(function ChartsTab() {
+  const [xCol, setXCol] = useState("");
+  const [yCol, setYCol] = useState("");
+  const [chartType, setType] = useState("Bar");
+  const [chart, setChart] = useState(null);
+  const [loading, setLoad] = useState(false);
+  const [error, setError] = useState("");
+  const [buildTrigger, setBuildTrigger] = useState(0);
+  const [isMultiColumnMode, setIsMultiColumnMode] = useState(false);
+  const [selectedColumns, setSelectedColumns] = useState([]);
+
+  // Debounce the build trigger
+  const debouncedBuildTrigger = useDebounce(buildTrigger, 300);
+
+  // Cached info data
+  const { data: info } = useApiCache(
+    "data-info-charts",
+    useCallback(async () => {
+      const res = await api.get("/data/info");
+      return res.data;
+    }, []),
+    []
+  );
+
+  // Memoize chart types list
+  const CHART_TYPES = useMemo(() => [
+    // Classic
+    "Bar", "Line", "Scatter", "Pie", "Histogram", "Box", "Heatmap", "Area",
+    "Treemap", "Radar", "Waterfall", "Stacked Bar", "Stacked Area",
+    "Bubble", "Violin", "Funnel", "Sunburst",
+    "Marimekko", "Table with Charts", "3D Area",
+    // 2026 Trending
+    "Sankey", "Beeswarm", "Bullet", "Small Multiples",
+    "Rose", "Time Series", "Infographic", "Network Graph", "Gantt",
+    // Advanced / AI-Era
+    "Parallel Coordinates", "Chord", "Hexbin", "Ridgeline", "Streamgraph",
+    "Dendrogram", "Voronoi", "Uncertainty", "PCA", "SHAP", "Choropleth", "Event Stream",
+    // Statistical
+    "Q-Q Plot", "ECDF", "KDE", "Rug Plot", "Dot Plot", "Lollipop",
+    "Slope Chart", "Dumbbell", "Diverging Bar",
+    // Business & Financial
+    "Candlestick", "Pair Plot", "Donut", "Waffle", "Pyramid", "100% Stacked",
+    // Time-Series
+    "ACF", "Contour", "Run Chart", "Control Chart",
+    // Creative
+    "Polar Line", "Radial Bar", "Circle Packing", "Arc Diagram", "Spiral", "Funnel Area",
+    // ML & AI
+    "ROC Curve", "Precision Recall", "Confusion Matrix", "Learning Curve", "Monte Carlo", "Drawdown",
+    // Matrix & Correlation
+    "Correlogram", "Cluster Heatmap", "Radial Heatmap", "Faceted Heatmap",
+    // Hierarchical
+    "Icicle", "Surface",
+    // Text & Bonus
+    "Word Frequency", "Horizon", "Animated Bubble",
+    // Statistical Advanced
+    "PDF Plot", "Kaplan-Meier", "Periodogram", "Adjacency Matrix", "Pareto", "Manhattan", "Volcano",
+    // Finance & Ops
+    "Dual Axis", "KPI Traffic Light", "Efficient Frontier", "Gain Chart",
+    // Spatial & Signal
+    "Delaunay", "Convex Hull", "Cross Correlation", "PACF", "Log Heatmap",
+    // Composite
+    "Variance Analysis", "Composite", "3D Volume",
+    // Survival & Signal
+    "Nelson-Aalen", "Hazard Function", "ACF Heatmap", "Scalogram", "Coherence",
+    // Network & Security
+    "Community Graph", "Attack Graph", "Animated Network", "Linked Brushing",
+    // Business Intelligence
+    "Sensitivity Analysis", "Strategy Map", "Balanced Scorecard",
+    // Spatial & UX
+    "Alpha Shape", "Faceted Grid", "User Journey",
+    // Hybrid & Narrative
+    "Sankey Heatmap", "Narrative", "Storyboard",
+  ], []);
+
+  // Memoize type map
+  const TYPE_MAP = useMemo(() => ({
+    "Stacked Bar": "stacked_bar",
+    "Stacked Area": "stacked_area",
+    "Table with Charts": "table_sparkline",
+    "3D Area": "3d_area",
+    "Marimekko": "marimekko",
+    "Sankey": "sankey",
+    "Beeswarm": "beeswarm",
+    "Bullet": "bullet",
+    "Small Multiples": "small multiples",
+    "Rose": "rose",
+    "Time Series": "timeseries",
+    "Network Graph": "network",
+    "Gantt": "gantt",
+    "Parallel Coordinates": "parallel coordinates",
+    "Chord": "chord",
+    "Hexbin": "hexbin",
+    "Ridgeline": "ridgeline",
+    "Streamgraph": "streamgraph",
+    "Dendrogram": "dendrogram",
+    "Voronoi": "voronoi",
+    "Uncertainty": "uncertainty",
+    "PCA": "pca",
+    "SHAP": "shap",
+    "Choropleth": "choropleth",
+    "Event Stream": "event stream",
+    "Q-Q Plot": "qq plot",
+    "ECDF": "ecdf",
+    "KDE": "kde",
+    "Rug Plot": "rug plot",
+    "Dot Plot": "dot plot",
+    "Lollipop": "lollipop",
+    "Slope Chart": "slope chart",
+    "Dumbbell": "dumbbell",
+    "Diverging Bar": "diverging bar",
+    "Candlestick": "candlestick",
+    "Pair Plot": "pair plot",
+    "Donut": "donut",
+    "Waffle": "waffle",
+    "Pyramid": "pyramid",
+    "100% Stacked": "100% stacked",
+    "ACF": "acf",
+    "Contour": "contour",
+    "Run Chart": "run chart",
+    "Control Chart": "control chart",
+    "Polar Line": "polar line",
+    "Radial Bar": "radial bar",
+    "Circle Packing": "circle packing",
+    "Arc Diagram": "arc diagram",
+    "Spiral": "spiral",
+    "Funnel Area": "funnel area",
+    "ROC Curve": "roc curve",
+    "Precision Recall": "precision recall",
+    "Confusion Matrix": "confusion matrix",
+    "Learning Curve": "learning curve",
+    "Monte Carlo": "monte carlo",
+    "Drawdown": "drawdown",
+    "Correlogram": "correlogram",
+    "Cluster Heatmap": "cluster heatmap",
+    "Radial Heatmap": "radial heatmap",
+    "Faceted Heatmap": "faceted heatmap",
+    "Icicle": "icicle",
+    "Surface": "surface",
+    "Word Frequency": "word frequency",
+    "Horizon": "horizon",
+    "Animated Bubble": "animated bubble",
+    "PDF Plot": "pdf plot",
+    "Kaplan-Meier": "kaplan meier",
+    "Periodogram": "periodogram",
+    "Adjacency Matrix": "adjacency matrix",
+    "Pareto": "pareto frontier",
+    "Manhattan": "manhattan plot",
+    "Volcano": "volcano plot",
+    "Dual Axis": "dual axis",
+    "KPI Traffic Light": "kpi traffic light",
+    "Efficient Frontier": "efficient frontier",
+    "Gain Chart": "gain chart",
+    "Delaunay": "delaunay",
+    "Convex Hull": "convex hull",
+    "Cross Correlation": "cross correlation",
+    "PACF": "pacf",
+    "Log Heatmap": "log heatmap",
+    "Variance Analysis": "variance analysis",
+    "Composite": "composite",
+    "3D Volume": "3d scatter volume",
+    "Nelson-Aalen": "nelson aalen",
+    "Hazard Function": "hazard function",
+    "ACF Heatmap": "autocorrelation heatmap",
+    "Scalogram": "scalogram",
+    "Coherence": "coherence",
+    "Community Graph": "community graph",
+    "Attack Graph": "attack graph",
+    "Animated Network": "animated network",
+    "Linked Brushing": "linked brushing",
+    "Sensitivity Analysis": "sensitivity analysis",
+    "Strategy Map": "strategy map",
+    "Balanced Scorecard": "balanced scorecard",
+    "Alpha Shape": "alpha shape",
+    "Faceted Grid": "faceted grid",
+    "User Journey": "user journey",
+    "Sankey Heatmap": "sankey heatmap",
+    "Narrative": "narrative",
+    "Storyboard": "storyboard",
+  }), []);
+
+  // Initialize columns - skip ID columns and select meaningful ones
+  useEffect(() => {
+    if (info) {
+      const cols = info.columns_info?.map(c => c.name) || [];
+      
+      // Filter out ID columns (Row ID, Order ID, etc.)
+      const meaningfulCols = cols.filter(col => 
+        !col.toLowerCase().includes('id') && 
+        !col.toLowerCase().includes('index') &&
+        !col.toLowerCase().includes('key')
+      );
+      
+      // Use meaningful columns if available, otherwise use all columns
+      const colsToUse = meaningfulCols.length >= 2 ? meaningfulCols : cols;
+      
+      if (colsToUse[0] && !xCol) setXCol(colsToUse[0]);
+      if (colsToUse[1] && !yCol) setYCol(colsToUse[1]);
+    }
+  }, [info, xCol, yCol]);
+
+  // Auto-rebuild chart when selected columns change in multi-column mode
+  useEffect(() => {
+    if (isMultiColumnMode && selectedColumns.length >= 2) {
+      // Trigger rebuild after a short delay to debounce rapid column selection changes
+      const timer = setTimeout(() => {
+        setBuildTrigger(t => t + 1);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedColumns, isMultiColumnMode]);
+
+  // Build chart when debounced trigger changes
+  const buildChart = useCallback(async () => {
+    if (isMultiColumnMode) {
+      // Multi-column mode
+      if (selectedColumns.length < 2) {
+        setError("Please select at least 2 columns for multi-column visualization");
+        return;
+      }
+      
+      setLoad(true);
+      setError("");
+      
+      try {
+        const effectiveType = TYPE_MAP[chartType] || chartType;
+        
+        // Auto-select chart type based on column count
+        let autoChartType = effectiveType;
+        if (selectedColumns.length === 2) {
+          autoChartType = "scatter";
+        } else if (selectedColumns.length === 3) {
+          autoChartType = "3d scatter volume";
+        } else if (selectedColumns.length >= 4 && selectedColumns.length <= 10) {
+          autoChartType = "parallel coordinates";
+        } else {
+          autoChartType = "correlogram";
+        }
+        
+        const { data } = await api.post("/viz/custom", {
+          chart_type: autoChartType,
+          columns: selectedColumns,
+        });
+        
+        setChart(data?.plotly_json || data);
+      } catch(e) {
+        const detail = e.response?.data?.detail || e.message || "Chart build failed";
+        setError(detail);
+      } finally {
+        setLoad(false);
+      }
+    } else {
+      // Simple mode (existing X vs Y logic)
+      if (!xCol) return;
+      
+      setLoad(true);
+      setError("");
+      
+      try {
+        const effectiveType = TYPE_MAP[chartType] || chartType;
+        const effectiveY = yCol || xCol;
+        
+        const { data } = await api.post("/viz/custom", {
+          chart_type: effectiveType,
+          x_col: xCol,
+          y_col: effectiveY,
+        });
+        
+        setChart(data?.plotly_json || data);
+      } catch(e) {
+        const detail = e.response?.data?.detail || e.message || "Chart build failed";
+        setError(detail);
+      } finally {
+        setLoad(false);
+      }
+    }
+  }, [xCol, yCol, chartType, TYPE_MAP, isMultiColumnMode, selectedColumns]);
+
+  // Trigger build on debounced value change
+  useEffect(() => {
+    if (debouncedBuildTrigger > 0) {
+      buildChart();
+    }
+  }, [debouncedBuildTrigger, buildChart]);
+
+  const handleBuildClick = useCallback(() => {
+    setBuildTrigger(t => t + 1);
+  }, []);
+
+  const handleXChange = useCallback((e) => {
+    setXCol(e.target.value);
+  }, []);
+
+  const handleYChange = useCallback((e) => {
+    setYCol(e.target.value);
+  }, []);
+
+  const handleTypeChange = useCallback((value) => {
+    setType(value);
+  }, []);
+
+  const handleModeToggle = useCallback(() => {
+    setIsMultiColumnMode(mode => !mode);
+    setSelectedColumns([]);
+    setError("");
+  }, []);
+
+  const handleColumnsChange = useCallback((cols) => {
+    setSelectedColumns(cols);
+  }, []);
+
+  const cols = useMemo(() => info?.columns_info?.map(c => c.name) || [], [info]);
+
+  // Memoize hint messages
+  const hintMessage = useMemo(() => {
+    const hints = {
+      "Pie": { text: "💡 Pie: X = category, Y = numeric value", color: "#f59e0b" },
+      "Waterfall": { text: "💡 Waterfall: X = labels, Y = numeric values", color: "#0ea5e9" },
+      "Funnel": { text: "💡 Funnel: X = labels, Y = numeric values", color: "#0ea5e9" },
+      "Radar": { text: "💡 Radar: uses all numeric columns automatically", color: "#10b981" },
+      "Heatmap": { text: "💡 Heatmap: uses all numeric columns automatically", color: "#10b981" },
+      "Marimekko": { text: "💡 Marimekko: X = category, Y = numeric — bar width = share of total", color: "#a855f7" },
+      "Table with Charts": { text: "💡 Table with Charts: shows data table with sparklines — no column selection needed", color: "#06b6d4" },
+      "3D Area": { text: "💡 3D Area: uses first 3 numeric columns as X, Y, Z axes automatically", color: "#f97316" },
+      "Sankey": { text: "🔀 Sankey/Alluvial: X = source category, Y = target category — shows flow between groups", color: "#6366f1" },
+      "Beeswarm": { text: "🐝 Beeswarm: X = category (optional), Y = numeric — shows every data point without overlap", color: "#10b981" },
+      "Bullet": { text: "🎯 Bullet Chart: compact KPI view — actual vs target vs performance range for all numeric columns", color: "#f59e0b" },
+      "Small Multiples": { text: "🔲 Small Multiples: X = category (facet), Y = numeric — side-by-side comparison grid", color: "#8b5cf6" },
+      "Rose": { text: "🌹 Rose/Polar Area: X = category — visually appealing alternative to pie charts", color: "#ec4899" },
+      "Time Series": { text: "📈 Time Series: X = time/index column — multi-layered with range slider for large datasets", color: "#0ea5e9" },
+      "Infographic": { text: "📰 Infographic: storytelling summary — KPI cards with delta indicators for all numeric columns", color: "#a855f7" },
+      "Network Graph": { text: "🕸 Network Graph: X = source node, Y = target node (category columns) — node size = connection count. Falls back to correlation network if no category columns.", color: "#6366f1" },
+      "Gantt": { text: "📅 Gantt: X = task/name column, Y = duration/numeric — auto-detects start/end columns if present (e.g. \"start_date\", \"end_date\")", color: "#10b981" },
+    };
+    return hints[chartType];
+  }, [chartType]);
+
+  if (!info) return <div style={S.empty}>No dataset loaded</div>;
+
+  return (
+    <div>
+      <div style={{ ...S.card, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ flex: "1 1 160px" }}>
+          <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>Chart Type (Searchable)</div>
+          <SearchableSelect
+            value={chartType}
+            onChange={handleTypeChange}
+            options={CHART_TYPES}
+            placeholder="Select chart type..."
+          />
+        </div>
+        
+        {/* Mode Toggle Button */}
+        <button onClick={handleModeToggle} style={{
+          padding: "8px 14px",
+          borderRadius: 8,
+          border: `2px solid ${isMultiColumnMode ? "#6366f1" : "rgba(255,255,255,.15)"}`,
+          background: isMultiColumnMode ? "rgba(99,102,241,.15)" : "transparent",
+          color: isMultiColumnMode ? "#818cf8" : "#a1a1aa",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "all .2s",
+          display: "flex",
+          alignItems: "center",
+          gap: 6
+        }}>
+          🎯 {isMultiColumnMode ? "Multi-Column Mode" : "Simple Mode"}
+        </button>
+        
+        {/* Conditional Column Selectors */}
+        {isMultiColumnMode ? (
+          <div style={{ flex: "1 1 200px" }}>
+            <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>Select Columns (2+)</div>
+            <MultiSelectColumnPicker
+              value={selectedColumns}
+              onChange={handleColumnsChange}
+              options={cols}
+            />
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: "1 1 140px" }}>
+              <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>X Column</div>
+              <select style={S.select} value={xCol} onChange={handleXChange}>
+                {cols.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: "1 1 140px" }}>
+              <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>Y Column</div>
+              <select style={S.select} value={yCol} onChange={handleYChange}>
+                <option value="">— same as X —</option>
+                {cols.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+        
+        <button onClick={handleBuildClick} disabled={loading || (isMultiColumnMode ? selectedColumns.length < 2 : !xCol)} style={{
+          ...S.btn,
+          cursor: (loading || (isMultiColumnMode ? selectedColumns.length < 2 : !xCol)) ? "not-allowed" : "pointer",
+          opacity: (loading || (isMultiColumnMode ? selectedColumns.length < 2 : !xCol)) ? 0.6 : 1
+        }}>
+          {loading ? "Building…" : "📊 Build Chart"}
+        </button>
+      </div>
+
+      {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,.05)", borderRadius: 8 }}>{error}</div>}
+      
+      {/* Multi-column mode hint */}
+      {isMultiColumnMode && selectedColumns.length > 0 && (
+        <div style={{ fontSize: 12, color: "#818cf8", marginBottom: 12, padding: "6px 12px", background: "rgba(99,102,241,.1)", borderRadius: 8 }}>
+          💡 Auto-selecting chart type: {selectedColumns.length === 2 ? "Scatter" : selectedColumns.length === 3 ? "3D Scatter" : selectedColumns.length >= 4 && selectedColumns.length <= 10 ? "Parallel Coordinates" : "Correlation Matrix"}
+        </div>
+      )}
+      
+      {hintMessage && !isMultiColumnMode && (
+        <div style={{ fontSize: 12, color: hintMessage.color, marginBottom: 12, padding: "6px 12px", background: `${hintMessage.color}10`, borderRadius: 8 }}>
+          {hintMessage.text}
+        </div>
+      )}
+
+      {loading && (
+        <div style={S.chartCard}>
+          <div style={S.chartTitle}>Building chart...</div>
+          <SkeletonChart height={420} />
+        </div>
+      )}
+
+      {!loading && chart && (
+        <div style={S.chartCard}>
+          <Safe><Chart figure={chart} height={420} /></Safe>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA DOCTOR TAB - Memoized with cached report
+// ═══════════════════════════════════════════════════════════════════════════════
+const DoctorTab = memo(function DoctorTab() {
+  const [report, setReport] = useState(null);
+  const [loading, setLoad] = useState(false);
+
+  const run = useCallback(async () => {
+    setLoad(true);
+    try {
+      const { data } = await api.get("/data/doctor");
+      setReport(data);
+    } catch (error) {
+      console.error("Doctor report error:", error);
+    } finally {
+      setLoad(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    run();
+  }, [run]);
+
+  const score = useMemo(() => report?.health_score ?? report?.score ?? 0, [report]);
+  const scoreColor = useMemo(() => score >= 80 ? "#22c55e" : score >= 50 ? "#f59e0b" : "#ef4444", [score]);
+  const issues = useMemo(() => report?.issues || [], [report]);
+  const columns = useMemo(() => report?.columns || {}, [report]);
+
+  if (loading) return (
+    <div style={S.empty}>
+      <SkeletonBox width="200px" height="40px" style={{ margin: "0 auto" }} />
+      <div style={{ marginTop: 20 }}>Running diagnostics…</div>
+    </div>
+  );
+
+  if (!report) return (
+    <div style={S.empty}>
+      <button onClick={run} style={S.btn}>🩺 Run Data Doctor</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 20 }}>
+        <div style={{ width: 80, height: 80, borderRadius: "50%", border: `4px solid ${scoreColor}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ fontSize: 22, fontWeight: 700, color: scoreColor }}>{score}</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>Data Health Score</div>
+          <div style={{ fontSize: 13, color: "#71717a", marginTop: 4 }}>
+            {score >= 80 ? "✅ Your data looks healthy" : score >= 50 ? "⚠️ Some issues detected" : "❌ Data needs attention"}
+          </div>
+        </div>
+        <button onClick={run} style={{ ...S.btn, marginLeft: "auto", padding: "6px 14px", fontSize: 12 }}>Refresh</button>
+      </div>
+
+      {issues.length > 0 && (
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#f87171", marginBottom: 10 }}>⚠ Issues Found</div>
+          {issues.map((issue, i) => (
+            <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.04)", fontSize: 13, color: "#a1a1aa" }}>
+              • {typeof issue === "string" ? issue : JSON.stringify(issue)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {Object.keys(columns).length > 0 && (
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#a1a1aa", marginBottom: 10 }}>Column Analysis</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={S.table}>
+              <thead>
+                <tr>{["Column", "Type", "Missing", "Unique", "Status"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {Object.entries(columns).map(([col, info]) => (
+                  <tr key={col}>
+                    <td style={S.td}>{col}</td>
+                    <td style={S.td}><span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, background: "rgba(99,102,241,.1)", color: "#818cf8" }}>{info.type || "—"}</span></td>
+                    <td style={S.td}>{info.missing ?? 0}</td>
+                    <td style={S.td}>{info.unique ?? "—"}</td>
+                    <td style={S.td}>
+                      <span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, background: (info.missing || 0) > 0 ? "rgba(251,191,36,.1)" : "rgba(34,197,94,.1)", color: (info.missing || 0) > 0 ? "#fbbf24" : "#4ade80" }}>
+                        {(info.missing || 0) > 0 ? "⚠ Has nulls" : "✓ Clean"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN DASHBOARD - Lazy tab rendering
+// ═══════════════════════════════════════════════════════════════════════════════
+const TABS = ["📊 Overview", "🔍 Data Explorer", "📈 Charts", "🩺 Data Doctor"];
+
+export default function Dashboard() {
+  const [tab, setTab] = useState(0);
+
+  // Cached dataset info
+  const { data: dsInfo } = useApiCache(
+    "dashboard-info",
+    useCallback(async () => {
+      const res = await api.get("/data/info");
+      const d = res.data;
+      if (d && typeof d.rows === "number") return d;
+      return null;
+    }, []),
+    []
+  );
+
+  const handleTabChange = useCallback((i) => {
+    startTransition(() => {
+      setTab(i);
+    });
+  }, []);
+
+  const handleClean = useCallback(() => {
+    api.post("/data/clean").catch(() => {});
+  }, []);
+
+  const handleExport = useCallback(() => {
+    api.get("/reports/export/csv").then(r => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([r.data]));
+      a.download = "export.csv";
+      a.click();
+    }).catch(() => {});
+  }, []);
+
+  // Memoize dataset summary
+  const datasetSummary = useMemo(() => {
+    if (!dsInfo) return "Upload a dataset to get started";
+    return `${dsInfo.rows?.toLocaleString()} rows · ${dsInfo.columns} columns`;
+  }, [dsInfo]);
+
+  return (
+    <Safe>
+      <div style={S.page}>
+        <div style={S.header}>
+          <div>
+            <div style={S.title}>📊 Dashboard</div>
+            <div style={S.sub}>{datasetSummary}</div>
+          </div>
+          {dsInfo && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleClean}
+                style={{ ...S.btn, background: "rgba(16,185,129,.15)", color: "#34d399", border: "1px solid rgba(16,185,129,.3)" }}>
+                🧹 Clean
+              </button>
+              <button onClick={handleExport}
+                style={{ ...S.btn, background: "rgba(99,102,241,.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,.3)" }}>
+                ⬇ Export
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div style={S.tabs}>
+          {TABS.map((t, i) => (
+            <button key={t} onClick={() => handleTabChange(i)} style={S.tab(tab === i)}>{t}</button>
+          ))}
+        </div>
+
+        {/* Lazy tab rendering - only render active tab */}
+        <Safe>
+          {tab === 0 && <OverviewTab />}
+          {tab === 1 && <ExplorerTab />}
+          {tab === 2 && <ChartsTab />}
+          {tab === 3 && <DoctorTab />}
+        </Safe>
+      </div>
+    </Safe>
+  );
+}
